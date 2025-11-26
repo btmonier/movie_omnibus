@@ -20,12 +20,14 @@ Open http://localhost:8080
 
 ## Features
 
-- **Movie Management** — Add, edit, delete movies with full metadata
-- **Letterboxd Scraping** — Auto-fetch movie data from Letterboxd URLs
-- **Physical Media Tracking** — Track VHS, DVD, Blu-ray, 4K, Digital copies
-- **Watch History** — Log viewings with dates, ratings, and notes
-- **Random Picker** — Get random unwatched movie suggestions with filters
-- **Search & Filter** — By title, genre, country, media type
+* Add, edit, delete movies with full metadata
+* Auto-fetch movie data from Letterboxd URLs
+* Track physical media - VHS, DVD, Blu-ray, 4K, and Digital
+* Log viewings with dates, ratings, and notes
+* Search and filter by title, genre, country, media type
+* Get random unwatched movie suggestions with filters!
+  + Heavily inspired by Goodbyte's [Watchlist Picker](https://watchlistpicker.com/)
+
 
 ## Gradle Tasks
 
@@ -44,8 +46,14 @@ Open http://localhost:8080
 
 ## Tech Stack
 
-Kotlin Multiplatform · Ktor · Exposed · PostgreSQL · kotlinx.html · JSoup
+* Kotlin Multiplatform
+* Ktor
+* Exposed
+* PostgreSQL
+* kotlinx.html
+* JSoup
 
-## License
+## Disclaimer
 
-For educational and personal use.
+This is intended for educational and personal use only. I made this in order to get a better understanding
+of PostgreSQL, REST APIs, and Kotlin Multiplatform
