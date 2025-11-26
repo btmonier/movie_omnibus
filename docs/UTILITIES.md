@@ -2,6 +2,15 @@
 
 Command-line tools for managing and inspecting your movie database.
 
+## Table of Contents
+
+- [List Movies](#list-movies)
+- [Compare Data](#compare-data)
+- [Migrate Data](#migrate-data)
+- [Scrape Letterboxd](#scrape-letterboxd)
+- [Database Management](#database-management)
+- [Server](#server)
+
 ## List Movies
 
 List all movie titles from the database.
