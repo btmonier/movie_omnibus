@@ -1,0 +1,16 @@
+# PostgreSQL Database Configuration
+# Copy this file to database.properties and update with your credentials
+
+# Database connection URL
+database.url=jdbc:postgresql://localhost:5432/moviedb
+
+# Database credentials
+database.user=postgres
+database.password=postgres
+
+# Connection pool settings
+database.maxPoolSize=10
+
+# Note: You can also use environment variables:
+# DATABASE_URL, DB_USER, DB_PASSWORD
+# Environment variables take precedence over this file
