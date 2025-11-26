@@ -35,14 +35,17 @@ Open http://localhost:8080
 |------|-------------|
 | `./gradlew runServer` | Start the web server |
 | `./gradlew jsBrowserDevelopmentWebpack` | Build frontend |
-| `./gradlew scrapeLetterboxd --args="--input file.csv"` | Bulk scrape from CSV |
+| `./gradlew listMovies` | List all movie titles |
+| `./gradlew compareData --args="--input file.json"` | Compare database with JSON file |
 | `./gradlew migrateData --args="--input file.json"` | Import JSON to database |
+| `./gradlew scrapeLetterboxd --args="--input file.csv"` | Bulk scrape from CSV |
 | `./gradlew test` | Run tests |
 
 ## Documentation
 
 - [Database Setup](docs/DATABASE_SETUP.md) — PostgreSQL setup, API reference
 - [Web Viewer](docs/WEB_VIEWER_README.md) — Frontend architecture
+- [CLI Utilities](docs/UTILITIES.md) — Command-line tools
 
 ## Tech Stack
 

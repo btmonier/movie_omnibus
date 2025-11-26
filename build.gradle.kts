@@ -210,6 +210,50 @@ tasks.register<JavaExec>("migrateData") {
     }
 }
 
+// Custom task for listing all movies in the database
+tasks.register<JavaExec>("listMovies") {
+    group = "application"
+    description = "List all movie titles from the database"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.migration.ListMoviesKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Allow passing arguments from command line
+    // Usage: ./gradlew listMovies
+    // Usage: ./gradlew listMovies --args="--count"
+    // Usage: ./gradlew listMovies --args="--with-url"
+    // Usage: ./gradlew listMovies --args="--output movies.txt"
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
+// Custom task for comparing database with JSON file
+tasks.register<JavaExec>("compareData") {
+    group = "application"
+    description = "Compare movies in database with a JSON file to see differences"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.migration.DataComparisonKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Allow passing arguments from command line
+    // Usage: ./gradlew compareData --args="--input output/movies.json"
+    // Usage: ./gradlew compareData --args="--input output/movies.json --show-existing"
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
 // Custom task for resetting the database
 tasks.register<JavaExec>("resetDatabase") {
     group = "application"
