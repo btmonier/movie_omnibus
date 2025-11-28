@@ -37,6 +37,13 @@ object Subgenres : IntIdTable("subgenres") {
 }
 
 /**
+ * Global distributors table - master list of all physical media distributors
+ */
+object Distributors : IntIdTable("distributors") {
+    val name = varchar("name", 200).uniqueIndex()
+}
+
+/**
  * Table for movie genres (many-to-many relationship)
  * Links movies to genres from the global Genres table
  */

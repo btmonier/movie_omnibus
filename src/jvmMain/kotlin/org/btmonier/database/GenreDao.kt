@@ -20,6 +20,14 @@ data class Subgenre(
 )
 
 /**
+ * Data class for Distributor
+ */
+data class Distributor(
+    val id: Int,
+    val name: String
+)
+
+/**
  * Data Access Object for genre and subgenre operations.
  */
 class GenreDao {
@@ -182,6 +190,72 @@ class GenreDao {
         } else {
             Subgenres.insertAndGetId {
                 it[Subgenres.name] = name
+            }.value
+        }
+    }
+
+    // ==================== Distributor Operations ====================
+
+    /**
+     * Get all distributors.
+     */
+    suspend fun getAllDistributors(): List<Distributor> = DatabaseFactory.dbQuery {
+        Distributors.selectAll()
+            .orderBy(Distributors.name to SortOrder.ASC)
+            .map { Distributor(it[Distributors.id].value, it[Distributors.name]) }
+    }
+
+    /**
+     * Get a distributor by ID.
+     */
+    suspend fun getDistributorById(id: Int): Distributor? = DatabaseFactory.dbQuery {
+        Distributors.selectAll().where { Distributors.id eq id }
+            .map { Distributor(it[Distributors.id].value, it[Distributors.name]) }
+            .singleOrNull()
+    }
+
+    /**
+     * Get a distributor by name.
+     */
+    suspend fun getDistributorByName(name: String): Distributor? = DatabaseFactory.dbQuery {
+        Distributors.selectAll().where { Distributors.name eq name }
+            .map { Distributor(it[Distributors.id].value, it[Distributors.name]) }
+            .singleOrNull()
+    }
+
+    /**
+     * Create a new distributor.
+     * Returns the distributor ID, or null if it already exists.
+     */
+    suspend fun createDistributor(name: String): Int? = DatabaseFactory.dbQuery {
+        val existing = Distributors.selectAll().where { Distributors.name eq name }.singleOrNull()
+        if (existing != null) {
+            return@dbQuery null
+        }
+
+        Distributors.insertAndGetId {
+            it[Distributors.name] = name
+        }.value
+    }
+
+    /**
+     * Delete a distributor.
+     */
+    suspend fun deleteDistributor(id: Int): Boolean = DatabaseFactory.dbQuery {
+        Distributors.deleteWhere { Distributors.id.eq(id) } > 0
+    }
+
+    /**
+     * Get or create a distributor by name.
+     * Returns the distributor ID.
+     */
+    suspend fun getOrCreateDistributor(name: String): Int = DatabaseFactory.dbQuery {
+        val existing = Distributors.selectAll().where { Distributors.name eq name }.singleOrNull()
+        if (existing != null) {
+            existing[Distributors.id].value
+        } else {
+            Distributors.insertAndGetId {
+                it[Distributors.name] = name
             }.value
         }
     }

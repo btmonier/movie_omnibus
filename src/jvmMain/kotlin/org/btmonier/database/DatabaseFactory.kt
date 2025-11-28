@@ -81,6 +81,7 @@ object DatabaseFactory {
                 MovieAlternateTitles,
                 Genres,
                 Subgenres,
+                Distributors,
                 MovieGenres,
                 MovieSubgenres,
                 MovieThemes,

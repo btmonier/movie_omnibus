@@ -265,6 +265,39 @@ suspend fun deleteSubgenre(id: Int): Boolean {
     return response.ok
 }
 
+// ==================== Distributor API ====================
+
+@kotlinx.serialization.Serializable
+data class DistributorResponse(
+    val id: Int,
+    val name: String
+)
+
+suspend fun fetchAllDistributors(): List<DistributorResponse> {
+    val response = window.fetch("$API_BASE_URL/distributors").await()
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+suspend fun createDistributor(name: String): DistributorResponse {
+    val response = window.fetch("$API_BASE_URL/distributors", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = """{"name": "$name"}"""
+    )).await()
+
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+suspend fun deleteDistributor(id: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/distributors/$id", RequestInit(
+        method = "DELETE"
+    )).await()
+
+    return response.ok
+}
+
 // ==================== Scraping API ====================
 
 @kotlinx.serialization.Serializable

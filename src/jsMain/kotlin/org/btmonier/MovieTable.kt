@@ -148,16 +148,40 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
                     style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
                     +"Search by Title"
                 }
-                input(type = InputType.text) {
-                    id = "search-input"
-                    style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; transition: border-color 0.2s;"
-                    placeholder = "Search movies..."
-                    attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.outline='none'"
-                    attributes["onblur"] = "this.style.borderColor='#dadce0'"
-                    onChangeFunction = { event ->
-                        searchText = (event.target as HTMLInputElement).value
-                        currentPage = 1 // Reset to first page
-                        updateTable()
+                div {
+                    style = "display: flex; gap: 8px;"
+                    input(type = InputType.text) {
+                        id = "search-input"
+                        style = "flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; transition: border-color 0.2s;"
+                        placeholder = "Search movies..."
+                        attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.outline='none'"
+                        attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                        onChangeFunction = { event ->
+                            searchText = (event.target as HTMLInputElement).value
+                            currentPage = 1 // Reset to first page
+                            updateTable()
+                        }
+                    }
+                    button {
+                        id = "reset-filters-button"
+                        style = """
+                            padding: 10px 16px;
+                            font-size: 14px;
+                            cursor: pointer;
+                            background-color: #f1f3f4;
+                            color: #5f6368;
+                            border: 1px solid #dadce0;
+                            border-radius: 4px;
+                            font-weight: 500;
+                            transition: background-color 0.2s;
+                            white-space: nowrap;
+                        """.trimIndent()
+                        attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
+                        attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
+                        +"Reset All"
+                        onClickFunction = {
+                            resetAllFilters()
+                        }
                     }
                 }
             }
@@ -404,6 +428,34 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
             val option = select.options.item(i) as? HTMLOptionElement ?: continue
             option.selected = option.value in selected
         }
+    }
+
+    private fun resetAllFilters() {
+        // Clear search text
+        searchText = ""
+        val searchInput = document.getElementById("search-input") as? HTMLInputElement
+        searchInput?.value = ""
+
+        // Clear genre filter
+        selectedGenres = emptySet()
+        updateSelectOptions("genre-select", selectedGenres)
+
+        // Clear country filter
+        selectedCountries = emptySet()
+        updateSelectOptions("country-select", selectedCountries)
+
+        // Clear media type filter
+        selectedMediaTypes = emptySet()
+        updateSelectOptions("media-type-select", selectedMediaTypes)
+
+        // Reset pagination
+        currentPage = 1
+
+        // Update the table and tag displays
+        updateTable()
+        renderGenreTags()
+        renderCountryTags()
+        renderMediaTypeTags()
     }
 
     private fun updateTable() {

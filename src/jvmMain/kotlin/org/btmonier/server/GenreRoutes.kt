@@ -30,6 +30,17 @@ data class SubgenreResponse(
     val name: String
 )
 
+@Serializable
+data class DistributorRequest(
+    val name: String
+)
+
+@Serializable
+data class DistributorResponse(
+    val id: Int,
+    val name: String
+)
+
 /**
  * Configure genre and subgenre management API routes.
  */
@@ -231,6 +242,74 @@ fun Route.genreRoutes(dao: GenreDao) {
                 call.respond(HttpStatusCode.OK, mapOf("message" to "Subgenre deleted successfully"))
             } else {
                 call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subgenre not found"))
+            }
+        }
+    }
+
+    route("/api/distributors") {
+
+        // GET /api/distributors - Get all distributors
+        get {
+            val distributors = dao.getAllDistributors()
+            val response = distributors.map { DistributorResponse(it.id, it.name) }
+            call.respond(HttpStatusCode.OK, response)
+        }
+
+        // GET /api/distributors/{id} - Get a specific distributor by ID
+        get("/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+            if (id == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid distributor ID"))
+                return@get
+            }
+
+            val distributor = dao.getDistributorById(id)
+            if (distributor != null) {
+                call.respond(HttpStatusCode.OK, DistributorResponse(distributor.id, distributor.name))
+            } else {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Distributor not found"))
+            }
+        }
+
+        // POST /api/distributors - Create a new distributor
+        post {
+            try {
+                val request = call.receive<DistributorRequest>()
+
+                if (request.name.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Distributor name is required"))
+                    return@post
+                }
+
+                val distributorId = dao.createDistributor(request.name)
+                if (distributorId != null) {
+                    val distributor = dao.getDistributorById(distributorId)
+                    if (distributor != null) {
+                        call.respond(HttpStatusCode.Created, DistributorResponse(distributor.id, distributor.name))
+                    } else {
+                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to create distributor"))
+                    }
+                } else {
+                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "Distributor already exists"))
+                }
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
+            }
+        }
+
+        // DELETE /api/distributors/{id} - Delete a distributor
+        delete("/{id}") {
+            val id = call.parameters["id"]?.toIntOrNull()
+            if (id == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid distributor ID"))
+                return@delete
+            }
+
+            val success = dao.deleteDistributor(id)
+            if (success) {
+                call.respond(HttpStatusCode.OK, mapOf("message" to "Distributor deleted successfully"))
+            } else {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Distributor not found"))
             }
         }
     }

@@ -20,6 +20,8 @@ class PhysicalMediaForm(
     private var editingMedia: PhysicalMedia? = null
     private val imageUrls = mutableListOf<Pair<String, String?>>() // url, description
     private val alertDialog = AlertDialog(container)
+    private var distributorSelector: DistributorSelector? = null
+    private var selectedDistributor: String? = null
 
     /**
      * Show the form for creating a new physical media entry.
@@ -28,6 +30,7 @@ class PhysicalMediaForm(
         editingMedia = null
         imageUrls.clear()
         imageUrls.add("" to null) // Start with one empty image field
+        selectedDistributor = null
         render()
     }
 
@@ -41,6 +44,7 @@ class PhysicalMediaForm(
         if (imageUrls.isEmpty()) {
             imageUrls.add("" to null) // Ensure at least one image field
         }
+        selectedDistributor = media.distributor
         render()
     }
 
@@ -227,8 +231,23 @@ class PhysicalMediaForm(
             }
         }
 
-        // Distributor
-        inputField("Distributor", "physical-media-form-distributor", media?.distributor ?: "", "Warner Bros., Criterion, etc.", required = false)
+        // Distributor Selector Container
+        div {
+            id = "distributor-selector-container"
+            style = "position: relative;"
+        }
+
+        // Initialize the distributor selector after rendering
+        mainScope.launch {
+            distributorSelector = DistributorSelector(
+                containerId = "distributor-selector-container",
+                selectedDistributor = selectedDistributor,
+                onDistributorChanged = { newDistributor ->
+                    selectedDistributor = newDistributor
+                }
+            )
+            distributorSelector?.render()
+        }
 
         // Release Date
         div {
@@ -476,8 +495,7 @@ class PhysicalMediaForm(
             val title = (document.getElementById("physical-media-form-title") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
 
-            val distributor = (document.getElementById("physical-media-form-distributor") as HTMLInputElement).value.trim()
-                .takeIf { it.isNotBlank() }
+            val distributor = selectedDistributor?.trim()?.takeIf { it.isNotBlank() }
             val releaseDate = (document.getElementById("physical-media-form-release-date") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
             val blurayUrl = (document.getElementById("physical-media-form-bluray-url") as HTMLInputElement).value.trim()
