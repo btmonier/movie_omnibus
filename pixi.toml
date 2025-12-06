@@ -1,0 +1,14 @@
+[workspace]
+name = "image-compressor"
+version = "0.1.0"
+description = "CLI image compression utility using R and the magick package."
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[dependencies]
+r-base = "*"
+r-magick = "*"
+
+[tasks]
+comp = "Rscript scripts/magick_compress.R"
+

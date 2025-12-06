@@ -17,12 +17,9 @@ const val API_BASE_URL = "http://localhost:8080/api"
 fun main() {
     mainScope.launch {
         try {
-            // Load movie data from API
-            val movies = fetchMoviesFromApi()
-
-            // Initialize the movie table
+            // Initialize the movie table - it will load data itself
             val root = document.getElementById("root") ?: error("Couldn't find root container!")
-            val movieTable = MovieTable(root, movies)
+            val movieTable = MovieTable(root)
             movieTable.render()
         } catch (e: Exception) {
             console.error("Error loading movie data:", e)
@@ -41,7 +38,7 @@ fun main() {
 }
 
 /**
- * Fetch all movies from the API.
+ * Fetch all movies from the API (legacy - use fetchMoviesPaginated for large datasets).
  */
 suspend fun fetchMoviesFromApi(): List<MovieMetadata> {
     val response = window.fetch("$API_BASE_URL/movies").await()
@@ -49,7 +46,62 @@ suspend fun fetchMoviesFromApi(): List<MovieMetadata> {
         throw Exception("Failed to fetch movies: ${response.status} ${response.statusText}")
     }
     val jsonText = response.text().await()
-    return Json.decodeFromString(ListSerializer(MovieMetadata.serializer()), jsonText)
+    // Handle new paginated response format
+    val paginatedResponse: PaginatedMoviesResponse = Json.decodeFromString(jsonText)
+    return paginatedResponse.movies
+}
+
+// ==================== Pagination API ====================
+
+/**
+ * Paginated response for movie list.
+ */
+@kotlinx.serialization.Serializable
+data class PaginatedMoviesResponse(
+    val movies: List<MovieMetadata>,
+    val totalCount: Int,
+    val page: Int,
+    val pageSize: Int,
+    val totalPages: Int
+)
+
+/**
+ * Fetch paginated movies with optional filters.
+ */
+suspend fun fetchMoviesPaginated(
+    page: Int = 1,
+    pageSize: Int = 25,
+    search: String? = null,
+    genre: String? = null,
+    country: String? = null,
+    mediaType: String? = null
+): PaginatedMoviesResponse {
+    val params = mutableListOf<String>()
+    params.add("page=$page")
+    params.add("pageSize=$pageSize")
+    search?.let { if (it.isNotBlank()) params.add("search=$it") }
+    genre?.let { if (it.isNotBlank()) params.add("genre=$it") }
+    country?.let { if (it.isNotBlank()) params.add("country=$it") }
+    mediaType?.let { if (it.isNotBlank()) params.add("mediaType=$it") }
+
+    val queryString = "?" + params.joinToString("&")
+    val response = window.fetch("$API_BASE_URL/movies$queryString").await()
+
+    if (!response.ok) {
+        throw Exception("Failed to fetch movies: ${response.status} ${response.statusText}")
+    }
+
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+/**
+ * Fetch filter options for genres (as strings).
+ */
+suspend fun fetchGenreOptions(): List<String> {
+    val response = window.fetch("$API_BASE_URL/movies/genres").await()
+    val json = response.text().await()
+    return Json.decodeFromString(json)
 }
 
 /**

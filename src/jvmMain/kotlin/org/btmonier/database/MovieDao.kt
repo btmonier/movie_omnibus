@@ -1,15 +1,19 @@
 package org.btmonier.database
 
 import org.btmonier.MovieMetadata
+import org.btmonier.storage.GcsService
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import java.time.LocalDate
 
 /**
  * Data Access Object for movie database operations.
+ * 
+ * @param gcsService Optional GCS service for transforming image URLs to signed URLs.
+ *                   If null, image URLs are returned as-is from the database.
  */
-class MovieDao {
-    private val physicalMediaDao = PhysicalMediaDao()
+class MovieDao(gcsService: GcsService? = null) {
+    private val physicalMediaDao = PhysicalMediaDao(gcsService)
     private val watchedDao = WatchedDao()
     private val genreDao = GenreDao()
 
@@ -18,6 +22,107 @@ class MovieDao {
      */
     suspend fun getAllMovies(): List<MovieMetadata> = DatabaseFactory.dbQuery {
         Movies.selectAll().map { rowToMovieMetadata(it) }
+    }
+
+    /**
+     * Get paginated movies with optional filters.
+     * @param page Page number (1-based)
+     * @param pageSize Number of items per page
+     * @param search Optional search query for title
+     * @param genre Optional genre filter
+     * @param country Optional country filter
+     * @param mediaType Optional media type filter
+     * @return Pair of (movies, totalCount)
+     */
+    suspend fun getMoviesPaginated(
+        page: Int,
+        pageSize: Int,
+        search: String? = null,
+        genre: String? = null,
+        country: String? = null,
+        mediaType: String? = null
+    ): Pair<List<MovieMetadata>, Int> = DatabaseFactory.dbQuery {
+        // Start with all movie IDs
+        var candidateMovieIds: Set<Int>? = null
+
+        // Filter by search query (title or alternate titles)
+        if (!search.isNullOrBlank()) {
+            val lowerQuery = search.lowercase()
+            
+            val mainTitleMatches = Movies.selectAll()
+                .where { Movies.title.lowerCase() like "%$lowerQuery%" }
+                .map { it[Movies.id].value }
+                .toSet()
+
+            val alternateTitleMatches = MovieAlternateTitles.selectAll()
+                .where { MovieAlternateTitles.alternateTitle.lowerCase() like "%$lowerQuery%" }
+                .map { it[MovieAlternateTitles.movieId].value }
+                .toSet()
+
+            candidateMovieIds = mainTitleMatches + alternateTitleMatches
+        }
+
+        // Filter by genre
+        if (!genre.isNullOrBlank()) {
+            val genreRow = Genres.selectAll().where { Genres.name eq genre }.singleOrNull()
+            if (genreRow != null) {
+                val genreId = genreRow[Genres.id].value
+                val movieIdsWithGenre = MovieGenres.selectAll()
+                    .where { MovieGenres.genreId eq genreId }
+                    .map { it[MovieGenres.movieId].value }
+                    .toSet()
+
+                candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithGenre) ?: movieIdsWithGenre
+            } else {
+                // Genre not found, return empty results
+                return@dbQuery Pair(emptyList(), 0)
+            }
+        }
+
+        // Filter by country
+        if (!country.isNullOrBlank()) {
+            val movieIdsWithCountry = MovieCountries.selectAll()
+                .where { MovieCountries.country eq country }
+                .map { it[MovieCountries.movieId].value }
+                .toSet()
+
+            candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithCountry) ?: movieIdsWithCountry
+        }
+
+        // Filter by media type
+        if (!mediaType.isNullOrBlank()) {
+            val physicalMediaIdsWithType = PhysicalMediaTypes.selectAll()
+                .where { PhysicalMediaTypes.mediaType eq mediaType }
+                .map { it[PhysicalMediaTypes.physicalMediaId].value }
+                .toSet()
+
+            val movieIdsWithMediaType = PhysicalMedia.selectAll()
+                .where { PhysicalMedia.id inList physicalMediaIdsWithType }
+                .map { it[PhysicalMedia.movieId].value }
+                .toSet()
+
+            candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithMediaType) ?: movieIdsWithMediaType
+        }
+
+        // Build the query with filters
+        val query = if (candidateMovieIds != null) {
+            Movies.selectAll().where { Movies.id inList candidateMovieIds }
+        } else {
+            Movies.selectAll()
+        }
+
+        // Get total count
+        val totalCount = query.count().toInt()
+
+        // Get paginated results (sorted by title)
+        val offset = ((page - 1) * pageSize).toLong()
+        val movies = query
+            .orderBy(Movies.title to SortOrder.ASC)
+            .limit(pageSize)
+            .offset(offset)
+            .map { rowToMovieMetadata(it) }
+
+        Pair(movies, totalCount)
     }
 
     /**

@@ -30,6 +30,18 @@ data class ScrapeResponse(
 )
 
 /**
+ * Paginated response for movie list endpoint.
+ */
+@Serializable
+data class PaginatedMoviesResponse(
+    val movies: List<MovieMetadata>,
+    val totalCount: Int,
+    val page: Int,
+    val pageSize: Int,
+    val totalPages: Int
+)
+
+/**
  * Configure movie-related API routes.
  */
 fun Route.movieRoutes(dao: MovieDao) {
@@ -98,10 +110,33 @@ fun Route.movieRoutes(dao: MovieDao) {
             }
         }
 
-        // GET /api/movies - Get all movies
+        // GET /api/movies - Get paginated movies with optional filters
         get {
-            val movies = dao.getAllMovies()
-            call.respond(HttpStatusCode.OK, movies)
+            val page = call.request.queryParameters["page"]?.toIntOrNull() ?: 1
+            val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 25
+            val search = call.request.queryParameters["search"]
+            val genre = call.request.queryParameters["genre"]
+            val country = call.request.queryParameters["country"]
+            val mediaType = call.request.queryParameters["mediaType"]
+
+            val (movies, totalCount) = dao.getMoviesPaginated(
+                page = page,
+                pageSize = pageSize,
+                search = search,
+                genre = genre,
+                country = country,
+                mediaType = mediaType
+            )
+
+            val totalPages = if (totalCount == 0) 1 else (totalCount + pageSize - 1) / pageSize
+
+            call.respond(HttpStatusCode.OK, PaginatedMoviesResponse(
+                movies = movies,
+                totalCount = totalCount,
+                page = page,
+                pageSize = pageSize,
+                totalPages = totalPages
+            ))
         }
 
         // GET /api/movies/{id} - Get a specific movie by ID

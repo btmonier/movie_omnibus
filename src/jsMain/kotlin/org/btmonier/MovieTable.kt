@@ -6,24 +6,32 @@ import kotlinx.html.*
 import kotlinx.html.dom.append
 import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
+import kotlinx.html.js.onInputFunction
 import org.w3c.dom.*
-import org.w3c.dom.events.Event
 
-class MovieTable(private val container: Element, private var allMovies: List<MovieMetadata>) {
+class MovieTable(private val container: Element) {
+    // Filter state
     private var searchText = ""
-    private var selectedGenres = setOf<String>()
-    private var selectedCountries = setOf<String>()
-    private var selectedMediaTypes = setOf<String>()
-    private var sortColumn = SortColumn.TITLE
-    private var sortDirection = SortDirection.ASC
+    private var selectedGenre: String? = null
+    private var selectedCountry: String? = null
+    private var selectedMediaType: String? = null
 
-    // Pagination
+    // Pagination state (server-provided)
     private var currentPage = 1
     private var itemsPerPage = 25
+    private var totalCount = 0
+    private var totalPages = 1
 
-    private val allGenres = allMovies.flatMap { it.genres }.distinct().sorted()
-    private val allCountries = allMovies.flatMap { it.country }.distinct().sorted()
+    // Current page data
+    private var currentMovies: List<MovieMetadata> = emptyList()
+
+    // Filter options (loaded from API)
+    private var allGenres: List<String> = emptyList()
+    private var allCountries: List<String> = emptyList()
     private val allMediaTypes = listOf("VHS", "DVD", "Blu-ray", "4K", "Digital")
+
+    // Loading state
+    private var isLoading = false
 
     private val metadataModal = MovieMetadataModal(container) {
         // onClose callback - nothing special needed
@@ -31,14 +39,6 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
 
     private val confirmDialog = ConfirmDialog(container)
     private val alertDialog = AlertDialog(container)
-
-    enum class SortColumn {
-        TITLE, PHYSICAL_MEDIA
-    }
-
-    enum class SortDirection {
-        ASC, DESC
-    }
 
     fun render() {
         container.innerHTML = ""
@@ -115,8 +115,11 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
                     }
                 }
 
-                // Filters
-                renderFilters()
+                // Filters container (will be populated after loading options)
+                div {
+                    id = "filters-container"
+                    style = "margin-bottom: 24px;"
+                }
 
                 // Results count
                 div {
@@ -135,473 +138,385 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
             }
         }
 
-        updateTable()
+        // Load filter options and initial data
+        mainScope.launch {
+            loadFilterOptions()
+            renderFilters()
+            loadMovies()
+        }
     }
 
-    private fun DIV.renderFilters() {
-        div {
-            style = "margin-bottom: 24px; padding: 24px; background-color: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px;"
+    private suspend fun loadFilterOptions() {
+        try {
+            allGenres = fetchGenreOptions()
+            allCountries = fetchAllCountries()
+        } catch (e: Exception) {
+            console.error("Failed to load filter options:", e)
+        }
+    }
 
-            // Search input
+    private fun renderFilters() {
+        val filtersContainer = document.getElementById("filters-container") ?: return
+        filtersContainer.innerHTML = ""
+        filtersContainer.append {
             div {
-                label {
-                    style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                    +"Search by Title"
-                }
+                style = "padding: 24px; background-color: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px;"
+
+                // Search input
                 div {
-                    style = "display: flex; gap: 8px;"
-                    input(type = InputType.text) {
-                        id = "search-input"
-                        style = "flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; transition: border-color 0.2s;"
-                        placeholder = "Search movies..."
-                        attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.outline='none'"
-                        attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                    label {
+                        htmlFor = "search-input"
+                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                        +"Search by Title"
+                    }
+                    div {
+                        style = "display: flex; gap: 8px;"
+                        input(type = InputType.text) {
+                            id = "search-input"
+                            style = "flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; transition: border-color 0.2s;"
+                            placeholder = "Search movies..."
+                            value = searchText
+                            attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.outline='none'"
+                            attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                            onInputFunction = { event ->
+                                searchText = (event.target as HTMLInputElement).value
+                            }
+                            onChangeFunction = {
+                                currentPage = 1
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+                        button {
+                            id = "reset-filters-button"
+                            style = """
+                                padding: 10px 16px;
+                                font-size: 14px;
+                                cursor: pointer;
+                                background-color: #f1f3f4;
+                                color: #5f6368;
+                                border: 1px solid #dadce0;
+                                border-radius: 4px;
+                                font-weight: 500;
+                                transition: background-color 0.2s;
+                                white-space: nowrap;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
+                            +"Reset All"
+                            onClickFunction = {
+                                resetAllFilters()
+                            }
+                        }
+                    }
+                }
+
+                // Genre filter (single select for server-side filtering)
+                div {
+                    label {
+                        htmlFor = "genre-select"
+                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                        +"Filter by Genre"
+                    }
+                    select {
+                        id = "genre-select"
+                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
                         onChangeFunction = { event ->
-                            searchText = (event.target as HTMLInputElement).value
-                            currentPage = 1 // Reset to first page
-                            updateTable()
+                            val select = event.target as HTMLSelectElement
+                            selectedGenre = select.value.takeIf { it.isNotBlank() }
+                            currentPage = 1
+                            mainScope.launch { loadMovies() }
                         }
-                    }
-                    button {
-                        id = "reset-filters-button"
-                        style = """
-                            padding: 10px 16px;
-                            font-size: 14px;
-                            cursor: pointer;
-                            background-color: #f1f3f4;
-                            color: #5f6368;
-                            border: 1px solid #dadce0;
-                            border-radius: 4px;
-                            font-weight: 500;
-                            transition: background-color 0.2s;
-                            white-space: nowrap;
-                        """.trimIndent()
-                        attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
-                        attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
-                        +"Reset All"
-                        onClickFunction = {
-                            resetAllFilters()
-                        }
-                    }
-                }
-            }
 
-            // Genre filter
-            div {
-                label {
-                    style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                    +"Filter by Genre"
-                }
-                select {
-                    id = "genre-select"
-                    style = "width: 100%; padding: 8px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                    multiple = true
-                    attributes["size"] = "6"
-                    onChangeFunction = { event ->
-                        val select = event.target as HTMLSelectElement
-                        val selected = mutableSetOf<String>()
-                        for (i in 0 until select.options.length) {
-                            val option = select.options.item(i) as HTMLOptionElement?
-                            if (option?.selected == true && option.value.isNotEmpty()) {
-                                selected.add(option.value)
+                        option {
+                            value = ""
+                            selected = selectedGenre == null
+                            +"All Genres"
+                        }
+                        allGenres.forEach { genre ->
+                            option {
+                                value = genre
+                                selected = selectedGenre == genre
+                                +genre
                             }
                         }
-                        selectedGenres = selected
-                        currentPage = 1 // Reset to first page
-                        updateTable()
-                        renderGenreTags()
-                    }
-
-                    option {
-                        value = ""
-                        +"All Genres"
-                    }
-                    allGenres.forEach { genre ->
-                        option {
-                            value = genre
-                            +genre
-                        }
                     }
                 }
+
+                // Country filter (single select for server-side filtering)
                 div {
-                    id = "genre-tags"
-                    style = "margin-top: 5px; font-size: 12px;"
-                }
-            }
+                    label {
+                        htmlFor = "country-select"
+                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                        +"Filter by Country"
+                    }
+                    select {
+                        id = "country-select"
+                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
+                        onChangeFunction = { event ->
+                            val select = event.target as HTMLSelectElement
+                            selectedCountry = select.value.takeIf { it.isNotBlank() }
+                            currentPage = 1
+                            mainScope.launch { loadMovies() }
+                        }
 
-            // Country filter
-            div {
-                label {
-                    style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                    +"Filter by Country"
-                }
-                select {
-                    id = "country-select"
-                    style = "width: 100%; padding: 8px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                    multiple = true
-                    attributes["size"] = "6"
-                    onChangeFunction = { event ->
-                        val select = event.target as HTMLSelectElement
-                        val selected = mutableSetOf<String>()
-                        for (i in 0 until select.options.length) {
-                            val option = select.options.item(i) as HTMLOptionElement?
-                            if (option?.selected == true && option.value.isNotEmpty()) {
-                                selected.add(option.value)
+                        option {
+                            value = ""
+                            selected = selectedCountry == null
+                            +"All Countries"
+                        }
+                        allCountries.forEach { country ->
+                            option {
+                                value = country
+                                selected = selectedCountry == country
+                                +country
                             }
                         }
-                        selectedCountries = selected
-                        currentPage = 1 // Reset to first page
-                        updateTable()
-                        renderCountryTags()
-                    }
-
-                    option {
-                        value = ""
-                        +"All Countries"
-                    }
-                    allCountries.forEach { country ->
-                        option {
-                            value = country
-                            +country
-                        }
                     }
                 }
+
+                // Media Type filter (single select for server-side filtering)
                 div {
-                    id = "country-tags"
-                    style = "margin-top: 5px; font-size: 12px;"
-                }
-            }
+                    label {
+                        htmlFor = "media-type-select"
+                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                        +"Filter by Media Type"
+                    }
+                    select {
+                        id = "media-type-select"
+                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
+                        onChangeFunction = { event ->
+                            val select = event.target as HTMLSelectElement
+                            selectedMediaType = select.value.takeIf { it.isNotBlank() }
+                            currentPage = 1
+                            mainScope.launch { loadMovies() }
+                        }
 
-            // Media Type filter
-            div {
-                label {
-                    style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                    +"Filter by Media Type"
-                }
-                select {
-                    id = "media-type-select"
-                    style = "width: 100%; padding: 8px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                    multiple = true
-                    attributes["size"] = "6"
-                    onChangeFunction = { event ->
-                        val select = event.target as HTMLSelectElement
-                        val selected = mutableSetOf<String>()
-                        for (i in 0 until select.options.length) {
-                            val option = select.options.item(i) as HTMLOptionElement?
-                            if (option?.selected == true && option.value.isNotEmpty()) {
-                                selected.add(option.value)
+                        option {
+                            value = ""
+                            selected = selectedMediaType == null
+                            +"All Media Types"
+                        }
+                        allMediaTypes.forEach { mediaType ->
+                            option {
+                                value = mediaType
+                                selected = selectedMediaType == mediaType
+                                +mediaType
                             }
                         }
-                        selectedMediaTypes = selected
-                        currentPage = 1 // Reset to first page
-                        updateTable()
-                        renderMediaTypeTags()
-                    }
-
-                    option {
-                        value = ""
-                        +"All Media Types"
-                    }
-                    allMediaTypes.forEach { mediaType ->
-                        option {
-                            value = mediaType
-                            +mediaType
-                        }
-                    }
-                }
-                div {
-                    id = "media-type-tags"
-                    style = "margin-top: 5px; font-size: 12px;"
-                }
-            }
-        }
-    }
-
-    private fun renderGenreTags() {
-        val tagsDiv = document.getElementById("genre-tags") ?: return
-        tagsDiv.innerHTML = ""
-        if (selectedGenres.isEmpty()) return
-
-        tagsDiv.append {
-            selectedGenres.forEach { genre ->
-                span {
-                    style = "display: inline-block; padding: 4px 12px; margin-right: 6px; margin-top: 6px; background-color: #e8f0fe; color: #1967d2; border-radius: 16px; font-size: 13px; cursor: pointer; transition: background-color 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                    attributes["onmouseover"] = "this.style.backgroundColor='#d2e3fc'"
-                    attributes["onmouseout"] = "this.style.backgroundColor='#e8f0fe'"
-                    +"$genre ×"
-                    onClickFunction = {
-                        selectedGenres = selectedGenres - genre
-                        updateSelectOptions("genre-select", selectedGenres)
-                        updateTable()
-                        renderGenreTags()
                     }
                 }
             }
-            button {
-                style = "margin-top: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer; background-color: #ffffff; color: #1a73e8; border: 1px solid #dadce0; border-radius: 4px; font-weight: 500; transition: background-color 0.2s, box-shadow 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'; this.style.boxShadow='0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)'"
-                attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'; this.style.boxShadow='none'"
-                +"Clear All"
-                onClickFunction = {
-                    selectedGenres = emptySet()
-                    updateSelectOptions("genre-select", selectedGenres)
-                    updateTable()
-                    renderGenreTags()
-                }
-            }
-        }
-    }
-
-    private fun renderCountryTags() {
-        val tagsDiv = document.getElementById("country-tags") ?: return
-        tagsDiv.innerHTML = ""
-        if (selectedCountries.isEmpty()) return
-
-        tagsDiv.append {
-            selectedCountries.forEach { country ->
-                span {
-                    style = "display: inline-block; padding: 4px 12px; margin-right: 6px; margin-top: 6px; background-color: #e6f4ea; color: #137333; border-radius: 16px; font-size: 13px; cursor: pointer; transition: background-color 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                    attributes["onmouseover"] = "this.style.backgroundColor='#ceead6'"
-                    attributes["onmouseout"] = "this.style.backgroundColor='#e6f4ea'"
-                    +"$country ×"
-                    onClickFunction = {
-                        selectedCountries = selectedCountries - country
-                        updateSelectOptions("country-select", selectedCountries)
-                        updateTable()
-                        renderCountryTags()
-                    }
-                }
-            }
-            button {
-                style = "margin-top: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer; background-color: #ffffff; color: #1a73e8; border: 1px solid #dadce0; border-radius: 4px; font-weight: 500; transition: background-color 0.2s, box-shadow 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'; this.style.boxShadow='0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)'"
-                attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'; this.style.boxShadow='none'"
-                +"Clear All"
-                onClickFunction = {
-                    selectedCountries = emptySet()
-                    updateSelectOptions("country-select", selectedCountries)
-                    updateTable()
-                    renderCountryTags()
-                }
-            }
-        }
-    }
-
-    private fun renderMediaTypeTags() {
-        val tagsDiv = document.getElementById("media-type-tags") ?: return
-        tagsDiv.innerHTML = ""
-        if (selectedMediaTypes.isEmpty()) return
-
-        tagsDiv.append {
-            selectedMediaTypes.forEach { mediaType ->
-                span {
-                    style = "display: inline-block; padding: 4px 12px; margin-right: 6px; margin-top: 6px; background-color: #fef7e0; color: #c5221f; border-radius: 16px; font-size: 13px; cursor: pointer; transition: background-color 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                    attributes["onmouseover"] = "this.style.backgroundColor='#fee9c3'"
-                    attributes["onmouseout"] = "this.style.backgroundColor='#fef7e0'"
-                    +"$mediaType ×"
-                    onClickFunction = {
-                        selectedMediaTypes = selectedMediaTypes - mediaType
-                        updateSelectOptions("media-type-select", selectedMediaTypes)
-                        updateTable()
-                        renderMediaTypeTags()
-                    }
-                }
-            }
-            button {
-                style = "margin-top: 6px; padding: 6px 16px; font-size: 13px; cursor: pointer; background-color: #ffffff; color: #1a73e8; border: 1px solid #dadce0; border-radius: 4px; font-weight: 500; transition: background-color 0.2s, box-shadow 0.2s; font-family: 'Roboto', arial, sans-serif;"
-                attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'; this.style.boxShadow='0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)'"
-                attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'; this.style.boxShadow='none'"
-                +"Clear All"
-                onClickFunction = {
-                    selectedMediaTypes = emptySet()
-                    updateSelectOptions("media-type-select", selectedMediaTypes)
-                    updateTable()
-                    renderMediaTypeTags()
-                }
-            }
-        }
-    }
-
-    private fun updateSelectOptions(selectId: String, selected: Set<String>) {
-        val select = document.getElementById(selectId) as? HTMLSelectElement ?: return
-        for (i in 0 until select.options.length) {
-            val option = select.options.item(i) as? HTMLOptionElement ?: continue
-            option.selected = option.value in selected
         }
     }
 
     private fun resetAllFilters() {
-        // Clear search text
         searchText = ""
-        val searchInput = document.getElementById("search-input") as? HTMLInputElement
-        searchInput?.value = ""
-
-        // Clear genre filter
-        selectedGenres = emptySet()
-        updateSelectOptions("genre-select", selectedGenres)
-
-        // Clear country filter
-        selectedCountries = emptySet()
-        updateSelectOptions("country-select", selectedCountries)
-
-        // Clear media type filter
-        selectedMediaTypes = emptySet()
-        updateSelectOptions("media-type-select", selectedMediaTypes)
-
-        // Reset pagination
+        selectedGenre = null
+        selectedCountry = null
+        selectedMediaType = null
         currentPage = 1
 
-        // Update the table and tag displays
-        updateTable()
-        renderGenreTags()
-        renderCountryTags()
-        renderMediaTypeTags()
+        // Update UI
+        (document.getElementById("search-input") as? HTMLInputElement)?.value = ""
+        (document.getElementById("genre-select") as? HTMLSelectElement)?.value = ""
+        (document.getElementById("country-select") as? HTMLSelectElement)?.value = ""
+        (document.getElementById("media-type-select") as? HTMLSelectElement)?.value = ""
+
+        mainScope.launch { loadMovies() }
     }
 
-    private fun updateTable() {
-        val filtered = getFilteredMovies()
+    private suspend fun loadMovies() {
+        if (isLoading) return
+        isLoading = true
 
-        // Calculate pagination
-        val totalPages = kotlin.math.ceil(filtered.size.toDouble() / itemsPerPage).toInt()
-        if (currentPage > totalPages && totalPages > 0) {
-            currentPage = totalPages
+        showLoadingState()
+
+        try {
+            val response = fetchMoviesPaginated(
+                page = currentPage,
+                pageSize = itemsPerPage,
+                search = searchText.takeIf { it.isNotBlank() },
+                genre = selectedGenre,
+                country = selectedCountry,
+                mediaType = selectedMediaType
+            )
+
+            currentMovies = response.movies
+            totalCount = response.totalCount
+            totalPages = response.totalPages
+            currentPage = response.page
+
+            renderTable()
+        } catch (e: Exception) {
+            console.error("Failed to load movies:", e)
+            showErrorState("Failed to load movies: ${e.message}")
+        } finally {
+            isLoading = false
         }
-        if (currentPage < 1) {
-            currentPage = 1
+    }
+
+    private fun showLoadingState() {
+        val tableContainer = document.getElementById("table-container") ?: return
+        tableContainer.innerHTML = ""
+        tableContainer.append {
+            div {
+                style = "text-align: center; padding: 40px; color: #5f6368;"
+                +"Loading movies..."
+            }
         }
+    }
 
-        val startIndex = (currentPage - 1) * itemsPerPage
-        val endIndex = kotlin.math.min(startIndex + itemsPerPage, filtered.size)
-        val paginatedMovies = filtered.subList(startIndex, endIndex)
+    private fun showErrorState(message: String) {
+        val tableContainer = document.getElementById("table-container") ?: return
+        tableContainer.innerHTML = ""
+        tableContainer.append {
+            div {
+                style = "text-align: center; padding: 40px; color: #d93025; background-color: #fce8e6; border-radius: 8px;"
+                +message
+            }
+        }
+    }
 
+    private fun renderTable() {
         // Update count
         val countDiv = document.getElementById("results-count")
-        countDiv?.textContent = "Showing ${startIndex + 1}-$endIndex of ${filtered.size} movies (total: ${allMovies.size})"
+        val startIndex = (currentPage - 1) * itemsPerPage + 1
+        val endIndex = kotlin.math.min(currentPage * itemsPerPage, totalCount)
+        if (totalCount > 0) {
+            countDiv?.textContent = "Showing $startIndex-$endIndex of $totalCount movies"
+        } else {
+            countDiv?.textContent = "No movies found"
+        }
         countDiv?.setAttribute("style", "margin-bottom: 16px; font-size: 14px; color: #5f6368; font-family: 'Roboto', arial, sans-serif;")
 
         // Update table
         val tableContainer = document.getElementById("table-container") ?: return
         tableContainer.innerHTML = ""
         tableContainer.append {
-            table {
-                style = "width: 100%; border-collapse: collapse; background-color: white; border: 1px solid #dadce0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);"
+            if (currentMovies.isEmpty()) {
+                div {
+                    style = "text-align: center; padding: 40px; color: #5f6368; background-color: #f8f9fa; border-radius: 8px;"
+                    +"No movies match your search criteria."
+                }
+            } else {
+                table {
+                    style = "width: 100%; border-collapse: collapse; background-color: white; border: 1px solid #dadce0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);"
 
-                thead {
-                    style = "background-color: #f8f9fa; color: #202124; border-bottom: 1px solid #dadce0;"
-                    tr {
-                        renderSortableHeader("Title", SortColumn.TITLE)
-                        th {
-                            style = "padding: 12px 16px; text-align: left; font-weight: 500; font-size: 14px; color: #5f6368;"
-                            +"Physical Media"
-                        }
-                        th {
-                            style = "padding: 12px 16px; text-align: center; font-weight: 500; font-size: 14px; color: #5f6368; width: 180px;"
-                            +"Actions"
+                    thead {
+                        style = "background-color: #f8f9fa; color: #202124; border-bottom: 1px solid #dadce0;"
+                        tr {
+                            th {
+                                style = "padding: 12px 16px; text-align: left; font-weight: 500; font-size: 14px; color: #5f6368;"
+                                +"Title"
+                            }
+                            th {
+                                style = "padding: 12px 16px; text-align: left; font-weight: 500; font-size: 14px; color: #5f6368;"
+                                +"Physical Media"
+                            }
+                            th {
+                                style = "padding: 12px 16px; text-align: center; font-weight: 500; font-size: 14px; color: #5f6368; width: 180px;"
+                                +"Actions"
+                            }
                         }
                     }
-                }
 
-                tbody {
-                    paginatedMovies.forEach { movie ->
-                        tr {
-                            style = "border-bottom: 1px solid #e8eaed;"
-                            attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
+                    tbody {
+                        currentMovies.forEach { movie ->
+                            tr {
+                                style = "border-bottom: 1px solid #e8eaed;"
+                                attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
+                                attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
 
-                            td {
-                                style = "padding: 12px 16px; cursor: pointer;"
-                                onClickFunction = {
-                                    metadataModal.show(movie)
-                                }
-
-                                // Movie title
-                                div {
-                                    style = "color: #1a73e8; font-size: 14px; margin-bottom: 4px;"
-                                    attributes["onmouseover"] = "this.style.textDecoration='underline'"
-                                    attributes["onmouseout"] = "this.style.textDecoration='none'"
-                                    +movie.title
-                                }
-                            }
-                            td {
-                                style = "padding: 12px 16px;"
-                                // Display physical media badges with entry letters and titles
-                                movie.physicalMedia.forEach { media ->
-                                    // Show entry letter if available
-                                    if (media.entryLetter != null) {
-                                        span {
-                                            style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #f1f3f4; color: #202124; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'Roboto', arial, sans-serif;"
-                                            +media.entryLetter
-                                        }
-                                    }
-                                    // Show title if available
-                                    if (media.title != null) {
-                                        span {
-                                            style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #e8f0fe; color: #1967d2; border-radius: 4px; font-size: 11px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
-                                            +media.title
-                                        }
-                                    }
-                                    // Show each media type badge
-                                    media.mediaTypes.forEach { type ->
-                                        val mediaLabel = when (type) {
-                                            MediaType.VHS -> "VHS"
-                                            MediaType.DVD -> "DVD"
-                                            MediaType.BLURAY -> "Blu-ray"
-                                            MediaType.FOURK -> "4K"
-                                            MediaType.DIGITAL -> "Digital"
-                                        }
-                                        val badgeColor = when (type) {
-                                            MediaType.VHS -> "background-color: #e8f5e9; color: #1e8e3e;"
-                                            MediaType.DVD -> "background-color: #e3f2fd; color: #1565c0;"
-                                            MediaType.BLURAY -> "background-color: #f3e5f5; color: #6a1b9a;"
-                                            MediaType.FOURK -> "background-color: #fff3e0; color: #e65100;"
-                                            MediaType.DIGITAL -> "background-color: #fce4ec; color: #c2185b;"
-                                        }
-                                        span {
-                                            style = "display: inline-block; padding: 4px 10px; margin-right: 6px; margin-bottom: 4px; $badgeColor border-radius: 12px; font-size: 12px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
-                                            +mediaLabel
-                                        }
-                                    }
-                                }
-                            }
-                            td {
-                                style = "padding: 12px 16px; text-align: center;"
-                                button {
-                                    style = """
-                                        padding: 6px 16px;
-                                        margin-right: 8px;
-                                        font-size: 13px;
-                                        cursor: pointer;
-                                        background-color: #ffffff;
-                                        color: #1a73e8;
-                                        border: 1px solid #dadce0;
-                                        border-radius: 4px;
-                                        font-weight: 500;
-                                        transition: background-color 0.2s;
-                                    """.trimIndent()
-                                    attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
-                                    attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                                    +"Edit"
+                                td {
+                                    style = "padding: 12px 16px; cursor: pointer;"
                                     onClickFunction = {
-                                        showEditMovieForm(movie)
+                                        metadataModal.show(movie)
+                                    }
+
+                                    div {
+                                        style = "color: #1a73e8; font-size: 14px; margin-bottom: 4px;"
+                                        attributes["onmouseover"] = "this.style.textDecoration='underline'"
+                                        attributes["onmouseout"] = "this.style.textDecoration='none'"
+                                        +movie.title
                                     }
                                 }
-                                button {
-                                    style = """
-                                        padding: 6px 16px;
-                                        font-size: 13px;
-                                        cursor: pointer;
-                                        background-color: #ffffff;
-                                        color: #d93025;
-                                        border: 1px solid #dadce0;
-                                        border-radius: 4px;
-                                        font-weight: 500;
-                                        transition: background-color 0.2s;
-                                    """.trimIndent()
-                                    attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
-                                    attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                                    +"Delete"
-                                    onClickFunction = {
-                                        handleDeleteMovie(movie)
+                                td {
+                                    style = "padding: 12px 16px;"
+                                    movie.physicalMedia.forEach { media ->
+                                        if (media.entryLetter != null) {
+                                            span {
+                                                style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #f1f3f4; color: #202124; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'Roboto', arial, sans-serif;"
+                                                +media.entryLetter
+                                            }
+                                        }
+                                        if (media.title != null) {
+                                            span {
+                                                style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #e8f0fe; color: #1967d2; border-radius: 4px; font-size: 11px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
+                                                +media.title
+                                            }
+                                        }
+                                        media.mediaTypes.forEach { type ->
+                                            val mediaLabel = when (type) {
+                                                MediaType.VHS -> "VHS"
+                                                MediaType.DVD -> "DVD"
+                                                MediaType.BLURAY -> "Blu-ray"
+                                                MediaType.FOURK -> "4K"
+                                                MediaType.DIGITAL -> "Digital"
+                                            }
+                                            val badgeColor = when (type) {
+                                                MediaType.VHS -> "background-color: #e8f5e9; color: #1e8e3e;"
+                                                MediaType.DVD -> "background-color: #e3f2fd; color: #1565c0;"
+                                                MediaType.BLURAY -> "background-color: #f3e5f5; color: #6a1b9a;"
+                                                MediaType.FOURK -> "background-color: #fff3e0; color: #e65100;"
+                                                MediaType.DIGITAL -> "background-color: #fce4ec; color: #c2185b;"
+                                            }
+                                            span {
+                                                style = "display: inline-block; padding: 4px 10px; margin-right: 6px; margin-bottom: 4px; $badgeColor border-radius: 12px; font-size: 12px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
+                                                +mediaLabel
+                                            }
+                                        }
+                                    }
+                                }
+                                td {
+                                    style = "padding: 12px 16px; text-align: center;"
+                                    button {
+                                        style = """
+                                            padding: 6px 16px;
+                                            margin-right: 8px;
+                                            font-size: 13px;
+                                            cursor: pointer;
+                                            background-color: #ffffff;
+                                            color: #1a73e8;
+                                            border: 1px solid #dadce0;
+                                            border-radius: 4px;
+                                            font-weight: 500;
+                                            transition: background-color 0.2s;
+                                        """.trimIndent()
+                                        attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
+                                        attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
+                                        +"Edit"
+                                        onClickFunction = {
+                                            showEditMovieForm(movie)
+                                        }
+                                    }
+                                    button {
+                                        style = """
+                                            padding: 6px 16px;
+                                            font-size: 13px;
+                                            cursor: pointer;
+                                            background-color: #ffffff;
+                                            color: #d93025;
+                                            border: 1px solid #dadce0;
+                                            border-radius: 4px;
+                                            font-weight: 500;
+                                            transition: background-color 0.2s;
+                                        """.trimIndent()
+                                        attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                                        attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
+                                        +"Delete"
+                                        onClickFunction = {
+                                            handleDeleteMovie(movie)
+                                        }
                                     }
                                 }
                             }
@@ -611,7 +526,7 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
             }
 
             // Pagination controls
-            if (totalPages > 1) {
+            if (totalPages > 1 || totalCount > 0) {
                 div {
                     style = "margin-top: 20px; display: flex; justify-content: center; align-items: center; gap: 8px;"
 
@@ -637,7 +552,7 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
                         onClickFunction = {
                             if (currentPage > 1) {
                                 currentPage--
-                                updateTable()
+                                mainScope.launch { loadMovies() }
                             }
                         }
                     }
@@ -670,7 +585,7 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
                         onClickFunction = {
                             if (currentPage < totalPages) {
                                 currentPage++
-                                updateTable()
+                                mainScope.launch { loadMovies() }
                             }
                         }
                     }
@@ -704,8 +619,8 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
                                 val select = it.target as? HTMLSelectElement
                                 select?.value?.toIntOrNull()?.let { newSize ->
                                     itemsPerPage = newSize
-                                    currentPage = 1 // Reset to first page
-                                    updateTable()
+                                    currentPage = 1
+                                    mainScope.launch { loadMovies() }
                                 }
                             }
                         }
@@ -715,97 +630,17 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
         }
     }
 
-    private fun TR.renderSortableHeader(label: String, column: SortColumn) {
-        th {
-            style = "padding: 12px 16px; text-align: left; cursor: pointer; user-select: none; font-weight: 500; font-size: 14px; color: #5f6368; transition: background-color 0.2s;"
-            attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
-            attributes["onmouseout"] = "this.style.backgroundColor=''"
-            onClickFunction = {
-                if (sortColumn == column) {
-                    sortDirection = if (sortDirection == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
-                } else {
-                    sortColumn = column
-                    sortDirection = SortDirection.ASC
-                }
-                updateTable()
-            }
-
-            +label
-            if (sortColumn == column) {
-                span {
-                    style = "margin-left: 6px; color: #1a73e8;"
-                    +(if (sortDirection == SortDirection.ASC) "▲" else "▼")
-                }
-            }
-        }
-    }
-
-    private fun getFilteredMovies(): List<MovieMetadata> {
-        var filtered = allMovies
-
-        // Filter by search text
-        if (searchText.isNotBlank()) {
-            filtered = filtered.filter {
-                it.title.contains(searchText, ignoreCase = true)
-            }
-        }
-
-        // Filter by genres
-        if (selectedGenres.isNotEmpty()) {
-            filtered = filtered.filter { movie ->
-                movie.genres.any { it in selectedGenres }
-            }
-        }
-
-        // Filter by countries
-        if (selectedCountries.isNotEmpty()) {
-            filtered = filtered.filter { movie ->
-                movie.country.any { it in selectedCountries }
-            }
-        }
-
-        // Filter by media types
-        if (selectedMediaTypes.isNotEmpty()) {
-            filtered = filtered.filter { movie ->
-                movie.physicalMedia.any { media ->
-                    media.mediaTypes.any { type ->
-                        val mediaTypeString = when (type) {
-                            MediaType.VHS -> "VHS"
-                            MediaType.DVD -> "DVD"
-                            MediaType.BLURAY -> "Blu-ray"
-                            MediaType.FOURK -> "4K"
-                            MediaType.DIGITAL -> "Digital"
-                        }
-                        mediaTypeString in selectedMediaTypes
-                    }
-                }
-            }
-        }
-
-        // Sort
-        val sorted = when (sortColumn) {
-            SortColumn.TITLE -> filtered.sortedBy { it.title.lowercase() }
-            SortColumn.PHYSICAL_MEDIA -> filtered.sortedBy { it.physicalMedia.size }
-        }
-
-        return if (sortDirection == SortDirection.DESC) sorted.reversed() else sorted
-    }
-
     private fun showAddMovieForm() {
-        // First, show the Letterboxd URL form to scrape movie data
         val urlForm = LetterboxdUrlForm(
             container = container,
             onScrapedMovie = { scrapedMovie ->
-                // After scraping, show the edit form with pre-populated data
                 val form = MovieForm(container, onSave = { movie ->
                     createMovie(movie)
                 }, onCancel = {})
 
-                // If the scraped movie has data (URL is not blank), use it to pre-populate
                 if (scrapedMovie.url.isNotBlank()) {
                     form.showCreateWithData(scrapedMovie)
                 } else {
-                    // User chose manual entry
                     form.showCreate()
                 }
             },
@@ -835,9 +670,11 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
 
     private suspend fun createMovie(movie: MovieMetadata) {
         try {
-            val createdMovie = org.btmonier.createMovie(movie)
-            allMovies = allMovies + createdMovie
-            render()
+            org.btmonier.createMovie(movie)
+            // Reload current page to show updated data
+            loadFilterOptions()
+            renderFilters()
+            loadMovies()
             alertDialog.show(
                 title = "Success",
                 message = "Movie created successfully!"
@@ -856,9 +693,11 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
             throw Exception("Cannot update movie without ID")
         }
         try {
-            val updatedMovie = org.btmonier.updateMovie(movie.id, movie)
-            allMovies = allMovies.map { if (it.id == movie.id) updatedMovie else it }
-            render()
+            org.btmonier.updateMovie(movie.id, movie)
+            // Reload current page to show updated data
+            loadFilterOptions()
+            renderFilters()
+            loadMovies()
             alertDialog.show(
                 title = "Success",
                 message = "Movie updated successfully!"
@@ -885,8 +724,8 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
             try {
                 val success = org.btmonier.deleteMovie(movie.id)
                 if (success) {
-                    allMovies = allMovies.filter { it.id != movie.id }
-                    render()
+                    // Reload current page to show updated data
+                    loadMovies()
                     alertDialog.show(
                         title = "Success",
                         message = "Movie deleted successfully!"
@@ -908,15 +747,18 @@ class MovieTable(private val container: Element, private var allMovies: List<Mov
 
     private fun showGenreManagement() {
         val genreManagementUI = GenreManagementUI(container) {
-            // On close, refresh the movie list to update genre filters
-            render()
+            // On close, refresh filter options and data
+            mainScope.launch {
+                loadFilterOptions()
+                renderFilters()
+                loadMovies()
+            }
         }
         genreManagementUI.show()
     }
 
     private fun showRandomPicker() {
         val randomPicker = RandomMoviePicker(container, onBack = {
-            // Return to the main collection view
             render()
         })
         randomPicker.show()

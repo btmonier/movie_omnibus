@@ -303,11 +303,53 @@ class MovieMetadataModal(
                                                         }
                                                     }
                                                 }
+                                                // Physical Media Images Gallery
                                                 if (media.images.isNotEmpty()) {
                                                     div {
-                                                        style = "margin-top: 8px;"
-                                                        strong { +"Images: " }
-                                                        +"${media.images.size} image(s)"
+                                                        style = "margin-top: 12px; padding-top: 12px; border-top: 1px solid #e8eaed;"
+                                                        
+                                                        div {
+                                                            style = "font-size: 12px; font-weight: 600; color: #5f6368; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;"
+                                                            span { +"📸" }
+                                                            +"Images (${media.images.size})"
+                                                        }
+
+                                                        div {
+                                                            style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px;"
+                                                            media.images.forEach { image ->
+                                                                div {
+                                                                    style = "position: relative;"
+                                                                    a {
+                                                                        href = image.imageUrl
+                                                                        target = "_blank"
+                                                                        rel = "noopener noreferrer"
+                                                                        
+                                                                        img {
+                                                                            src = image.imageUrl
+                                                                            alt = image.description ?: "Physical media image"
+                                                                            style = """
+                                                                                width: 100%;
+                                                                                height: 140px;
+                                                                                object-fit: cover;
+                                                                                border-radius: 6px;
+                                                                                border: 1px solid #e8eaed;
+                                                                                cursor: pointer;
+                                                                                transition: transform 0.2s, box-shadow 0.2s;
+                                                                            """.trimIndent()
+                                                                            attributes["onmouseover"] = "this.style.transform='scale(1.03)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'"
+                                                                            attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                                                                            attributes["onerror"] = "this.style.display='none'; this.parentElement.innerHTML='<div style=\"width:100%;height:140px;background:#f1f3f4;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#5f6368;font-size:12px;\">Image unavailable</div>'"
+                                                                        }
+                                                                    }
+                                                                    if (!image.description.isNullOrBlank()) {
+                                                                        div {
+                                                                            style = "text-align: center; font-size: 11px; color: #5f6368; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                                                                            +image.description
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }

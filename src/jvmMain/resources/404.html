@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Page Not Found | The Movie Omnibus</title>
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Google Sans', 'Roboto', arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ed 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #202124;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+            max-width: 600px;
+        }
+
+        .error-icon {
+            font-size: 120px;
+            margin-bottom: 24px;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
+            50% { transform: translateY(-20px); }
+        }
+
+        .error-code {
+            font-size: 96px;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 16px;
+            letter-spacing: -2px;
+        }
+
+        .error-title {
+            font-size: 28px;
+            font-weight: 500;
+            color: #202124;
+            margin-bottom: 16px;
+        }
+
+        .error-message {
+            font-size: 16px;
+            color: #5f6368;
+            line-height: 1.6;
+            margin-bottom: 32px;
+        }
+
+        .suggestions {
+            background-color: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 32px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+        }
+
+        .suggestions h3 {
+            font-size: 14px;
+            font-weight: 500;
+            color: #5f6368;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .suggestion-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .suggestion-list li {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #5f6368;
+            font-size: 14px;
+        }
+
+        .suggestion-list li::before {
+            content: "→";
+            color: #1a73e8;
+            font-weight: 500;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 14px 32px;
+            font-size: 15px;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            box-shadow: 0 4px 14px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+        }
+
+        .btn-secondary {
+            background-color: white;
+            color: #1a73e8;
+            border: 1px solid #dadce0;
+        }
+
+        .btn-secondary:hover {
+            background-color: #f8f9fa;
+            border-color: #1a73e8;
+        }
+
+        .footer {
+            position: fixed;
+            bottom: 24px;
+            color: #5f6368;
+            font-size: 13px;
+        }
+
+        .footer a {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Film strip decoration */
+        .film-strip {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            max-width: 800px;
+            height: 20px;
+            background: repeating-linear-gradient(
+                90deg,
+                #202124 0px,
+                #202124 30px,
+                transparent 30px,
+                transparent 40px
+            );
+            opacity: 0.1;
+        }
+
+        .film-strip-bottom {
+            top: auto;
+            bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="film-strip"></div>
+    <div class="film-strip film-strip-bottom"></div>
+    
+    <div class="container">
+        <div class="error-icon">🎬</div>
+        <div class="error-code">404</div>
+        <h1 class="error-title">Reel Not Found</h1>
+        <p class="error-message">
+            Looks like this scene ended up on the cutting room floor. 
+            The page you're looking for doesn't exist or has been moved to another archive.
+        </p>
+
+        <div class="suggestions">
+            <h3>Here's what you can do</h3>
+            <ul class="suggestion-list">
+                <li>Check the URL for any typos</li>
+                <li>Head back to the collection and browse movies</li>
+                <li>Try the random movie picker for a surprise</li>
+                <li>Make sure the server is running on port 8080</li>
+            </ul>
+        </div>
+
+        <div class="button-group">
+            <a href="/" class="btn btn-primary">
+                🏠 Back to Collection
+            </a>
+            <a href="/api" class="btn btn-secondary">
+                📚 View API Docs
+            </a>
+        </div>
+    </div>
+
+    <div class="footer">
+        <span>The Movie Omnibus</span> · <a href="/">Home</a>
+    </div>
+</body>
+</html>
+

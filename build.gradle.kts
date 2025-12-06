@@ -97,6 +97,9 @@ kotlin {
                 
                 // Jansi for colored console output on Windows
                 implementation("org.fusesource.jansi:jansi:2.4.1")
+                
+                // Google Cloud Storage for signed URL generation
+                implementation("com.google.cloud:google-cloud-storage:2.43.1")
             }
         }
 

@@ -1,0 +1,14 @@
+# Google Cloud Storage Configuration
+# Copy this file to gcs.properties and fill in your values
+
+# The name of your GCS bucket (required)
+gcs.bucket=your-bucket-name
+
+# Path to your service account JSON key file (required)
+# The service account needs storage.objects.get permission on the bucket
+gcs.credentials.path=/path/to/service-account-key.json
+
+# Duration in minutes for signed URLs (optional, default: 60)
+# Signed URLs will expire after this time
+gcs.signed.url.duration.minutes=60
+

@@ -2,6 +2,7 @@ package org.btmonier.database
 
 import org.btmonier.MediaType
 import org.btmonier.PhysicalMediaImage
+import org.btmonier.storage.GcsService
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import java.time.LocalDate
@@ -9,8 +10,11 @@ import org.btmonier.PhysicalMedia as PhysicalMediaEntity
 
 /**
  * Data Access Object for physical media database operations.
+ * 
+ * @param gcsService Optional GCS service for transforming image URLs to signed URLs.
+ *                   If null, image URLs are returned as-is from the database.
  */
-class PhysicalMediaDao {
+class PhysicalMediaDao(private val gcsService: GcsService? = null) {
 
     /**
      * Get all physical media entries for a specific movie.
@@ -158,8 +162,11 @@ class PhysicalMediaDao {
 
         val images = PhysicalMediaImages.selectAll().where { PhysicalMediaImages.physicalMediaId eq mediaId }
             .map {
+                val rawImageUrl = it[PhysicalMediaImages.imageUrl]
+                // Transform GCS paths to signed URLs if GCS service is configured
+                val transformedUrl = gcsService?.transformUrl(rawImageUrl) ?: rawImageUrl
                 PhysicalMediaImage(
-                    imageUrl = it[PhysicalMediaImages.imageUrl],
+                    imageUrl = transformedUrl,
                     description = it[PhysicalMediaImages.description],
                     id = it[PhysicalMediaImages.id].value
                 )
