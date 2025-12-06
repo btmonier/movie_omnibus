@@ -155,6 +155,16 @@ suspend fun deleteMovie(id: Int): Boolean {
 }
 
 /**
+ * Fetch a single movie by ID.
+ */
+suspend fun getMovieById(id: Int): MovieMetadata? {
+    val response = window.fetch("$API_BASE_URL/movies/$id").await()
+    if (!response.ok) return null
+    val jsonText = response.text().await()
+    return Json.decodeFromString(MovieMetadata.serializer(), jsonText)
+}
+
+/**
  * Fetch physical media entries for a movie.
  */
 suspend fun fetchPhysicalMediaForMovie(movieId: Int): List<PhysicalMedia> {

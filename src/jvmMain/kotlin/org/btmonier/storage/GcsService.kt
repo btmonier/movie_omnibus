@@ -188,5 +188,39 @@ class GcsService private constructor(
             url
         }
     }
+
+    /**
+     * Check if a URL is a signed GCS URL that we generated.
+     * Signed URLs look like: https://storage.googleapis.com/bucket/path?X-Goog-Algorithm=...
+     */
+    fun isSignedGcsUrl(url: String): Boolean {
+        return url.startsWith("https://storage.googleapis.com/") && 
+               url.contains("X-Goog-")
+    }
+
+    /**
+     * Extract the original storable path from a signed GCS URL.
+     * Converts https://storage.googleapis.com/bucket-name/path/to/object?... back to path/to/object
+     *
+     * @param url The URL to clean (can be a signed URL, regular URL, or GCS path)
+     * @return The storable path (without query parameters and bucket prefix)
+     */
+    fun cleanUrlForStorage(url: String): String {
+        if (!isSignedGcsUrl(url)) {
+            return url
+        }
+
+        // Remove query parameters
+        val urlWithoutParams = url.substringBefore("?")
+        
+        // Extract path from https://storage.googleapis.com/bucket-name/path/to/object
+        val prefix = "https://storage.googleapis.com/$bucketName/"
+        return if (urlWithoutParams.startsWith(prefix)) {
+            urlWithoutParams.removePrefix(prefix)
+        } else {
+            // Fallback: just strip query params
+            urlWithoutParams
+        }
+    }
 }
 

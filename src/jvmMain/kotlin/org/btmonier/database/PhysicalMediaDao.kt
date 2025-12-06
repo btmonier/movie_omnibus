@@ -145,9 +145,11 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
     // Helper function to insert images for a physical media entry
     private fun insertImages(physicalMediaId: Int, images: List<PhysicalMediaImage>) {
         images.forEach { image ->
+            // Clean the image URL before saving - converts signed GCS URLs back to storable paths
+            val cleanedUrl = gcsService?.cleanUrlForStorage(image.imageUrl) ?: image.imageUrl
             PhysicalMediaImages.insert {
                 it[PhysicalMediaImages.physicalMediaId] = physicalMediaId
-                it[imageUrl] = image.imageUrl
+                it[imageUrl] = cleanedUrl
                 it[description] = image.description
             }
         }
