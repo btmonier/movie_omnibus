@@ -7,7 +7,7 @@ A Kotlin Multiplatform application for managing your movie collection with Lette
 **Requirements:** Java 21+, PostgreSQL
 
 ```bash
-# Setup database (see docs/DATABASE_SETUP.md)
+# Setup database (see docs/database_setup.md)
 cp database.properties.example database.properties
 # Edit database.properties with your credentials
 
@@ -31,21 +31,21 @@ Open http://localhost:8080
 
 ## Gradle Tasks
 
-| Task | Description |
-|------|-------------|
-| `./gradlew runServer` | Start the web server |
-| `./gradlew jsBrowserDevelopmentWebpack` | Build frontend |
-| `./gradlew listMovies` | List all movie titles |
-| `./gradlew compareData --args="--input file.json"` | Compare database with JSON file |
-| `./gradlew migrateData --args="--input file.json"` | Import JSON to database |
-| `./gradlew scrapeLetterboxd --args="--input file.csv"` | Bulk scrape from CSV |
-| `./gradlew test` | Run tests |
+| Task                                                   | Description                     |
+|--------------------------------------------------------|---------------------------------|
+| `./gradlew runServer`                                  | Start the web server            |
+| `./gradlew jsBrowserDevelopmentWebpack`                | Build frontend                  |
+| `./gradlew listMovies`                                 | List all movie titles           |
+| `./gradlew compareData --args="--input file.json"`     | Compare database with JSON file |
+| `./gradlew migrateData --args="--input file.json"`     | Import JSON to database         |
+| `./gradlew scrapeLetterboxd --args="--input file.csv"` | Bulk scrape from CSV            |
+| `./gradlew test`                                       | Run tests                       |
 
 ## Documentation
 
-- [Database Setup](docs/DATABASE_SETUP.md) — PostgreSQL setup, API reference
-- [Web Viewer](docs/WEB_VIEWER_README.md) — Frontend architecture
-- [CLI Utilities](docs/UTILITIES.md) — Command-line tools
+- [Database Setup](docs/database_setup.md) — PostgreSQL setup, API reference
+- [Web Viewer](docs/web_viewer.md) — Frontend architecture
+- [CLI Utilities](docs/cli_utilities.md) — Command-line tools
 
 ## Tech Stack
 

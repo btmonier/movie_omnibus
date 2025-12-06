@@ -132,7 +132,7 @@ This version is automatically injected into the frontend via a generated `BuildC
 
 ### Database Configuration
 
-See [DATABASE_SETUP.md](DATABASE_SETUP.md) for database configuration instructions.
+See [`database_setup.md`](database_setup.md) for database configuration instructions.
 
 ## Building for Production
 
