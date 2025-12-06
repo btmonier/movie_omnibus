@@ -54,7 +54,9 @@ class GcsService private constructor(
                 return null
             }
 
-            val credentialsPath = props.getProperty("gcs.credentials.path")
+            val credentialsPath = System.getenv(
+                props.getProperty("gcs.credentials.path")
+            )
             if (credentialsPath.isNullOrBlank()) {
                 logger.error("GCS credentials path not configured in $CONFIG_FILE")
                 return null
