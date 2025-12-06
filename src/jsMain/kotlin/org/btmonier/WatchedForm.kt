@@ -19,13 +19,17 @@ class WatchedForm(
 ) {
     private var editingEntry: WatchedEntry? = null
     private val alertDialog = AlertDialog(container)
+    private var popcornRating: PopcornRating? = null
+    private var selectedRating: Double? = null
 
     /**
      * Show the form for creating a new watched entry.
      */
     fun showCreate() {
         editingEntry = null
+        selectedRating = null
         render()
+        initializePopcornRating()
     }
 
     /**
@@ -33,7 +37,20 @@ class WatchedForm(
      */
     fun showEdit(entry: WatchedEntry) {
         editingEntry = entry
+        selectedRating = entry.rating
         render()
+        initializePopcornRating()
+    }
+
+    private fun initializePopcornRating() {
+        popcornRating = PopcornRating(
+            containerId = "popcorn-rating-container",
+            currentRating = selectedRating,
+            onRatingChanged = { rating ->
+                selectedRating = rating
+            }
+        )
+        popcornRating?.render()
     }
 
     /**
@@ -169,28 +186,17 @@ class WatchedForm(
         div {
             style = "margin-bottom: 16px;"
             label {
-                htmlFor = "form-rating"
                 style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
                 +"Rating (out of 5)"
             }
-            input(type = InputType.number) {
-                id = "form-rating"
-                value = entry?.rating?.toString() ?: ""
-                placeholder = "e.g., 4.5"
-                attributes["step"] = "0.5"
-                attributes["min"] = "0"
-                attributes["max"] = "5"
+            div {
+                id = "popcorn-rating-container"
                 style = """
-                    width: 100%;
                     padding: 10px 12px;
-                    font-size: 14px;
                     border: 1px solid #dadce0;
                     border-radius: 4px;
-                    box-sizing: border-box;
-                    font-family: 'Roboto', arial, sans-serif;
+                    background-color: #fafafa;
                 """.trimIndent()
-                attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
-                attributes["onblur"] = "this.style.borderColor='#dadce0'"
             }
         }
 
@@ -235,20 +241,8 @@ class WatchedForm(
                 return
             }
 
-            val ratingStr = (document.getElementById("form-rating") as HTMLInputElement).value.trim()
-            val rating = if (ratingStr.isNotBlank()) {
-                val parsed = ratingStr.toDoubleOrNull()
-                if (parsed == null || parsed < 0 || parsed > 10) {
-                    alertDialog.show(
-                        title = "Validation Error",
-                        message = "Rating must be a number between 0 and 10!"
-                    )
-                    return
-                }
-                parsed
-            } else {
-                null
-            }
+            // Get rating from popcorn rating component
+            val rating = selectedRating
 
             val notes = (document.getElementById("form-notes") as HTMLTextAreaElement).value.trim()
                 .takeIf { it.isNotBlank() }

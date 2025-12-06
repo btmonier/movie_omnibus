@@ -322,6 +322,22 @@ class PhysicalMediaForm(
         h3 {
             style = "margin-top: 24px; margin-bottom: 12px; color: #5f6368; font-size: 16px;"
             +"Images"
+            // Show count of existing images when editing
+            val existingImageCount = imageUrls.count { it.first.isNotBlank() }
+            if (existingImageCount > 0) {
+                span {
+                    style = """
+                        margin-left: 8px;
+                        padding: 2px 8px;
+                        background-color: #e8f0fe;
+                        color: #1a73e8;
+                        border-radius: 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                    """.trimIndent()
+                    +"$existingImageCount loaded"
+                }
+            }
         }
 
         div {

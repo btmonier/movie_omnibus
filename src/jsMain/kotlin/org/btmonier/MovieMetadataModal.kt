@@ -1,6 +1,7 @@
 package org.btmonier
 
 import kotlinx.browser.document
+import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
 import kotlinx.html.js.onClickFunction
@@ -13,10 +14,13 @@ class MovieMetadataModal(
     private val container: Element,
     private val onClose: () -> Unit
 ) {
+    private var currentMovie: MovieMetadata? = null
+    private val alertDialog = AlertDialog(container)
     /**
      * Show the modal with movie metadata.
      */
     fun show(movie: MovieMetadata) {
+        currentMovie = movie
         // Remove existing modal if any
         close()
 
@@ -316,29 +320,27 @@ class MovieMetadataModal(
 
                                                         div {
                                                             style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px;"
-                                                            media.images.forEach { image ->
+                                                            val allImages = media.images
+                                                            media.images.forEachIndexed { imageIndex, image ->
                                                                 div {
                                                                     style = "position: relative;"
-                                                                    a {
-                                                                        href = image.imageUrl
-                                                                        target = "_blank"
-                                                                        rel = "noopener noreferrer"
-                                                                        
-                                                                        img {
-                                                                            src = image.imageUrl
-                                                                            alt = image.description ?: "Physical media image"
-                                                                            style = """
-                                                                                width: 100%;
-                                                                                height: 140px;
-                                                                                object-fit: cover;
-                                                                                border-radius: 6px;
-                                                                                border: 1px solid #e8eaed;
-                                                                                cursor: pointer;
-                                                                                transition: transform 0.2s, box-shadow 0.2s;
-                                                                            """.trimIndent()
-                                                                            attributes["onmouseover"] = "this.style.transform='scale(1.03)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'"
-                                                                            attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='none'"
-                                                                            attributes["onerror"] = "this.style.display='none'; this.parentElement.innerHTML='<div style=\"width:100%;height:140px;background:#f1f3f4;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#5f6368;font-size:12px;\">Image unavailable</div>'"
+                                                                    img {
+                                                                        src = image.imageUrl
+                                                                        alt = image.description ?: "Physical media image"
+                                                                        style = """
+                                                                            width: 100%;
+                                                                            height: 140px;
+                                                                            object-fit: cover;
+                                                                            border-radius: 6px;
+                                                                            border: 1px solid #e8eaed;
+                                                                            cursor: pointer;
+                                                                            transition: transform 0.2s, box-shadow 0.2s;
+                                                                        """.trimIndent()
+                                                                        attributes["onmouseover"] = "this.style.transform='scale(1.03)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'"
+                                                                        attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                                                                        attributes["onerror"] = "this.style.display='none'; this.parentElement.innerHTML='<div style=\"width:100%;height:140px;background:#f1f3f4;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#5f6368;font-size:12px;\">Image unavailable</div>'"
+                                                                        onClickFunction = {
+                                                                            ImageLightbox.show(allImages, imageIndex)
                                                                         }
                                                                     }
                                                                     if (!image.description.isNullOrBlank()) {
@@ -424,6 +426,33 @@ class MovieMetadataModal(
                             }
                         }
 
+                        // Add Watched Entry button
+                        if (movie.id != null) {
+                            val movieId = movie.id
+                            div {
+                                style = "margin-top: 16px; padding-top: 16px; border-top: 1px solid #dadce0;"
+                                button {
+                                    style = """
+                                        padding: 10px 20px;
+                                        font-size: 14px;
+                                        cursor: pointer;
+                                        background-color: #34a853;
+                                        color: white;
+                                        border: none;
+                                        border-radius: 4px;
+                                        font-weight: 500;
+                                        transition: background-color 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='#2d8e47'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='#34a853'"
+                                    +"+ Add Watched Entry"
+                                    onClickFunction = {
+                                        showAddWatchedEntryForm(movieId)
+                                    }
+                                }
+                            }
+                        }
+
                         // Letterboxd URL
                         if (!movie.url.isNullOrBlank()) {
                             div {
@@ -484,6 +513,34 @@ class MovieMetadataModal(
                 style = "color: #5f6368; font-size: 14px;"
                 +value
             }
+        }
+    }
+
+    private fun showAddWatchedEntryForm(movieId: Int) {
+        val form = WatchedForm(container, onSave = { watchedEntry ->
+            createWatchedEntryForMovie(movieId, watchedEntry)
+        }, onCancel = {})
+        form.showCreate()
+    }
+
+    private suspend fun createWatchedEntryForMovie(movieId: Int, watchedEntry: WatchedEntry) {
+        try {
+            createWatchedEntry(movieId, watchedEntry)
+            alertDialog.show(
+                title = "Success",
+                message = "Watched entry added successfully!"
+            )
+            // Refresh the modal with updated movie data
+            val updatedMovie = getMovieById(movieId)
+            if (updatedMovie != null) {
+                currentMovie = updatedMovie
+                show(updatedMovie)
+            }
+        } catch (e: Exception) {
+            alertDialog.show(
+                title = "Error",
+                message = "Failed to add watched entry: ${e.message}"
+            )
         }
     }
 }

@@ -87,7 +87,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                         background-color: white;
                         padding: 30px;
                         border-radius: 8px;
-                        max-width: 600px;
+                        max-width: 900px;
                         width: 90%;
                         max-height: 90vh;
                         overflow-y: auto;
@@ -388,7 +388,24 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                                     }
                                     td {
                                         style = "padding: 10px 12px; color: #5f6368;"
-                                        +"${media.images.size} image${if (media.images.size != 1) "s" else ""}"
+                                        if (media.images.isNotEmpty()) {
+                                            val mediaImages = media.images
+                                            span {
+                                                style = """
+                                                    cursor: pointer;
+                                                    color: #1a73e8;
+                                                    text-decoration: none;
+                                                """.trimIndent()
+                                                attributes["onmouseover"] = "this.style.textDecoration='underline'"
+                                                attributes["onmouseout"] = "this.style.textDecoration='none'"
+                                                +"${media.images.size} image${if (media.images.size != 1) "s" else ""}"
+                                                onClickFunction = {
+                                                    ImageLightbox.show(mediaImages, 0)
+                                                }
+                                            }
+                                        } else {
+                                            +"0 images"
+                                        }
                                     }
                                     td {
                                         style = "padding: 10px 12px; text-align: center;"

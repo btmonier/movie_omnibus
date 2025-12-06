@@ -30,6 +30,7 @@ class RandomMoviePicker(
     private var isLoading: Boolean = false
 
     private val metadataModal = MovieMetadataModal(container) {}
+    private val alertDialog = AlertDialog(container)
 
     fun show() {
         mainScope.launch {
@@ -441,26 +442,26 @@ class RandomMoviePicker(
 
                                         div {
                                             style = "display: flex; flex-wrap: wrap; gap: 12px;"
-                                            media.images.forEach { image ->
+                                            media.images.forEachIndexed { imageIndex, image ->
                                                 div {
                                                     style = "position: relative;"
-                                                    a {
-                                                        href = image.imageUrl
-                                                        target = "_blank"
-                                                        img {
-                                                            src = image.imageUrl
-                                                            alt = image.description ?: "Physical media image"
-                                                            style = """
-                                                                width: 120px;
-                                                                height: 160px;
-                                                                object-fit: cover;
-                                                                border-radius: 8px;
-                                                                border: 1px solid #e8eaed;
-                                                                cursor: pointer;
-                                                                transition: transform 0.2s, box-shadow 0.2s;
-                                                            """.trimIndent()
-                                                            attributes["onmouseover"] = "this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'"
-                                                            attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                                                    val allImages = media.images
+                                                    img {
+                                                        src = image.imageUrl
+                                                        alt = image.description ?: "Physical media image"
+                                                        style = """
+                                                            width: 120px;
+                                                            height: 160px;
+                                                            object-fit: cover;
+                                                            border-radius: 8px;
+                                                            border: 1px solid #e8eaed;
+                                                            cursor: pointer;
+                                                            transition: transform 0.2s, box-shadow 0.2s;
+                                                        """.trimIndent()
+                                                        attributes["onmouseover"] = "this.style.transform='scale(1.05)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.15)'"
+                                                        attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='none'"
+                                                        onClickFunction = {
+                                                            ImageLightbox.show(allImages, imageIndex)
                                                         }
                                                     }
                                                     image.description?.let { desc ->
@@ -515,6 +516,30 @@ class RandomMoviePicker(
                         +"View Details"
                         onClickFunction = {
                             metadataModal.show(movie)
+                        }
+                    }
+
+                    // Add Watched Entry button
+                    if (movie.id != null) {
+                        val movieId = movie.id
+                        button {
+                            style = """
+                                padding: 12px 24px;
+                                font-size: 14px;
+                                cursor: pointer;
+                                background-color: #34a853;
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                font-weight: 500;
+                                transition: background-color 0.2s;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#2d8e47'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='#34a853'"
+                            +"+ Add Watched Entry"
+                            onClickFunction = {
+                                showAddWatchedEntryForm(movieId)
+                            }
                         }
                     }
 
@@ -668,6 +693,34 @@ class RandomMoviePicker(
             div {
                 renderResultSection()
             }
+        }
+    }
+
+    private fun showAddWatchedEntryForm(movieId: Int) {
+        val form = WatchedForm(container, onSave = { watchedEntry ->
+            createWatchedEntryForMovie(movieId, watchedEntry)
+        }, onCancel = {})
+        form.showCreate()
+    }
+
+    private suspend fun createWatchedEntryForMovie(movieId: Int, watchedEntry: WatchedEntry) {
+        try {
+            createWatchedEntry(movieId, watchedEntry)
+            alertDialog.show(
+                title = "Success",
+                message = "Watched entry added successfully!"
+            )
+            // Refresh the picked movie data to show the new entry
+            val updatedMovie = getMovieById(movieId)
+            if (updatedMovie != null) {
+                pickedMovie = updatedMovie
+                updateResultSection()
+            }
+        } catch (e: Exception) {
+            alertDialog.show(
+                title = "Error",
+                message = "Failed to add watched entry: ${e.message}"
+            )
         }
     }
 }
