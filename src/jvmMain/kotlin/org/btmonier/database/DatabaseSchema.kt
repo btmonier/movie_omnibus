@@ -1,7 +1,9 @@
 package org.btmonier.database
 
 import org.jetbrains.exposed.dao.id.IntIdTable
+import org.jetbrains.exposed.sql.javatime.CurrentDateTime
 import org.jetbrains.exposed.sql.javatime.date
+import org.jetbrains.exposed.sql.javatime.datetime
 
 /**
  * Database table schema for movie metadata.
@@ -12,6 +14,7 @@ object Movies : IntIdTable("movies") {
     val description = text("description").nullable() // Movie synopsis/description
     val releaseDate = date("release_date").nullable()
     val runtimeMins = integer("runtime_mins").nullable()
+    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime) // Auto-set on insert
 }
 
 /**
@@ -105,6 +108,7 @@ object PhysicalMedia : IntIdTable("physical_media") {
     val releaseDate = date("release_date").nullable()
     val blurayComUrl = varchar("bluray_com_url", 500).nullable()
     val location = varchar("location", 50).nullable() // Archive, Shelf
+    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime) // Auto-set on insert
 }
 
 /**

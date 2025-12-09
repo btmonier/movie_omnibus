@@ -37,7 +37,8 @@ data class PhysicalMedia(
     val blurayComUrl: String? = null,
     val location: String? = null,  // Archive or Shelf
     val images: List<PhysicalMediaImage> = emptyList(),
-    val id: Int? = null  // Database ID
+    val id: Int? = null,  // Database ID
+    val createdAt: String? = null  // ISO datetime string, auto-set on insert
 )
 
 /**
@@ -68,5 +69,6 @@ data class MovieMetadata(
     val runtime_mins: Int? = null,
     val physicalMedia: List<PhysicalMedia> = emptyList(),
     val watchedEntries: List<WatchedEntry> = emptyList(),
-    val id: Int? = null  // Database ID, only populated when reading from DB
+    val id: Int? = null,  // Database ID, only populated when reading from DB
+    val createdAt: String? = null  // ISO datetime string, auto-set on insert
 )

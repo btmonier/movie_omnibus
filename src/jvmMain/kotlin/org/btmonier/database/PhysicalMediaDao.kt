@@ -183,7 +183,8 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
             blurayComUrl = row[PhysicalMedia.blurayComUrl],
             location = row[PhysicalMedia.location],
             images = images,
-            id = mediaId
+            id = mediaId,
+            createdAt = row[PhysicalMedia.createdAt].toString()
         )
     }
 

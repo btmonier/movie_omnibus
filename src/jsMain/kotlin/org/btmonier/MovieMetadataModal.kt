@@ -122,14 +122,18 @@ class MovieMetadataModal(
                             }
                         }
 
-                        // Release Date & Runtime
-                        if (movie.release_date != null || movie.runtime_mins != null) {
+                        // Release Date, Runtime & Date Added
+                        if (movie.release_date != null || movie.runtime_mins != null || !movie.createdAt.isNullOrBlank()) {
                             metadataRow("Basic Information") {
                                 if (movie.release_date != null) {
                                     metadataField("Release Date", movie.release_date.toString())
                                 }
                                 if (movie.runtime_mins != null) {
                                     metadataField("Runtime", "${movie.runtime_mins} minutes")
+                                }
+                                if (!movie.createdAt.isNullOrBlank()) {
+                                    val dateAdded = movie.createdAt.replace("T", " ").substringBeforeLast(":") // Format: "2024-12-08 14:30"
+                                    metadataField("Date Added", dateAdded)
                                 }
                             }
                         }
@@ -300,11 +304,19 @@ class MovieMetadataModal(
                                                 }
                                                 if (!media.blurayComUrl.isNullOrBlank()) {
                                                     div {
+                                                        style = "margin-bottom: 4px;"
                                                         a(href = media.blurayComUrl, target = "_blank") {
                                                             rel = "noopener noreferrer"
                                                             style = "color: #1a73e8; text-decoration: none;"
                                                             +"View on Blu-ray.com"
                                                         }
+                                                    }
+                                                }
+                                                if (!media.createdAt.isNullOrBlank()) {
+                                                    div {
+                                                        style = "margin-top: 8px; font-size: 11px; color: #9aa0a6;"
+                                                        val dateAdded = media.createdAt.substringBefore("T")
+                                                        +"Added to collection: $dateAdded"
                                                     }
                                                 }
                                                 // Physical Media Images Gallery

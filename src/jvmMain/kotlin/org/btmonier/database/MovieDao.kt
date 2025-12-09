@@ -612,7 +612,8 @@ class MovieDao(gcsService: GcsService? = null) {
             runtime_mins = row[Movies.runtimeMins],
             physicalMedia = physicalMedia,
             watchedEntries = watchedEntries,
-            id = movieId
+            id = movieId,
+            createdAt = row[Movies.createdAt].toString()
         )
     }
 }

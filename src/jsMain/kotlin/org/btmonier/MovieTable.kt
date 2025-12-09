@@ -10,25 +10,38 @@ import kotlinx.html.js.onInputFunction
 import org.w3c.dom.*
 
 class MovieTable(private val container: Element) {
-    // Filter state
+    // Filter state (now supporting multiple selections)
     private var searchText = ""
-    private var selectedGenre: String? = null
-    private var selectedCountry: String? = null
-    private var selectedMediaType: String? = null
+    private var selectedGenres: MutableSet<String> = mutableSetOf()
+    private var selectedCountries: MutableSet<String> = mutableSetOf()
+    private var selectedMediaTypes: MutableSet<String> = mutableSetOf()
+
+    // Sorting state
+    private var sortField: SortField = SortField.TITLE
+    private var sortDirection: SortDirection = SortDirection.ASC
+
+    enum class SortField { TITLE, RELEASE_DATE, DATE_ADDED }
+    enum class SortDirection { ASC, DESC }
 
     // Pagination state (server-provided)
     private var currentPage = 1
-    private var itemsPerPage = 25
+    private var itemsPerPage = 24
     private var totalCount = 0
     private var totalPages = 1
 
     // Current page data
     private var currentMovies: List<MovieMetadata> = emptyList()
+    private var displayedMovies: List<MovieMetadata> = emptyList()
 
     // Filter options (loaded from API)
     private var allGenres: List<String> = emptyList()
     private var allCountries: List<String> = emptyList()
     private val allMediaTypes = listOf("VHS", "DVD", "Blu-ray", "4K", "Digital")
+
+    // Dropdown open states
+    private var genreDropdownOpen = false
+    private var countryDropdownOpen = false
+    private var mediaTypeDropdownOpen = false
 
     // Loading state
     private var isLoading = false
@@ -47,61 +60,68 @@ class MovieTable(private val container: Element) {
                 style = "max-width: 1400px; margin: 0 auto; padding: 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
 
                 div {
-                    style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px;"
+                    style = """
+                        display: flex;
+                        flex-wrap: wrap;
+                        justify-content: space-between;
+                        align-items: center;
+                        gap: 16px;
+                        margin-bottom: 24px;
+                    """.trimIndent()
                     h1 {
-                        style = "color: #202124; font-weight: 400; font-size: 28px; margin: 0;"
-                        +"The Movie Omnibus"
+                        style = "color: #202124; font-weight: 400; font-size: 26px; margin: 0;"
+                        +"🎬 The Movie Omnibus"
                     }
                     div {
-                        style = "display: flex; gap: 12px;"
+                        style = "display: flex; flex-wrap: wrap; gap: 10px;"
                         button {
                             style = """
-                                padding: 10px 24px;
-                                font-size: 14px;
+                                padding: 10px 18px;
+                                font-size: 13px;
                                 cursor: pointer;
                                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                                 color: white;
                                 border: none;
-                                border-radius: 4px;
+                                border-radius: 8px;
                                 font-weight: 500;
                                 transition: transform 0.2s, box-shadow 0.2s;
                                 box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
                             """.trimIndent()
                             attributes["onmouseover"] = "this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'"
                             attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.3)'"
-                            +"🎲 Random Pick"
+                            +"🎲 Random"
                             onClickFunction = {
                                 showRandomPicker()
                             }
                         }
                         button {
                             style = """
-                                padding: 10px 24px;
-                                font-size: 14px;
+                                padding: 10px 18px;
+                                font-size: 13px;
                                 cursor: pointer;
                                 background-color: #ffffff;
                                 color: #1a73e8;
                                 border: 1px solid #dadce0;
-                                border-radius: 4px;
+                                border-radius: 8px;
                                 font-weight: 500;
                                 transition: background-color 0.2s;
                             """.trimIndent()
                             attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                            +"⚙ Manage Genres"
+                            +"⚙ Genres"
                             onClickFunction = {
                                 showGenreManagement()
                             }
                         }
                         button {
                             style = """
-                                padding: 10px 24px;
-                                font-size: 14px;
+                                padding: 10px 18px;
+                                font-size: 13px;
                                 cursor: pointer;
                                 background-color: #1a73e8;
                                 color: white;
                                 border: none;
-                                border-radius: 4px;
+                                border-radius: 8px;
                                 font-weight: 500;
                                 transition: background-color 0.2s;
                             """.trimIndent()
@@ -127,10 +147,9 @@ class MovieTable(private val container: Element) {
                     style = "margin-bottom: 15px; font-size: 14px; color: #666;"
                 }
 
-                // Table container
+                // Cards container
                 div {
-                    id = "table-container"
-                    style = "overflow-x: auto;"
+                    id = "cards-container"
                 }
 
                 // Footer
@@ -160,24 +179,48 @@ class MovieTable(private val container: Element) {
         filtersContainer.innerHTML = ""
         filtersContainer.append {
             div {
-                style = "padding: 24px; background-color: #f8f9fa; border: 1px solid #dadce0; border-radius: 8px; display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 20px;"
+                style = """
+                    padding: 20px;
+                    background-color: #f8f9fa;
+                    border: 1px solid #dadce0;
+                    border-radius: 12px;
+                """.trimIndent()
 
-                // Search input
+                // Row 1: Search and Sort (responsive)
                 div {
-                    label {
-                        htmlFor = "search-input"
-                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                        +"Search by Title"
-                    }
+                    style = """
+                        display: grid;
+                        grid-template-columns: 1fr auto;
+                        gap: 16px;
+                        margin-bottom: 16px;
+                    """.trimIndent()
+                    attributes["class"] = "filter-row-1"
+
+                    // Search input
                     div {
-                        style = "display: flex; gap: 8px;"
+                        style = "min-width: 0;"
+                        label {
+                            htmlFor = "search-input"
+                            style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                            +"🔍 Search"
+                        }
                         input(type = InputType.text) {
                             id = "search-input"
-                            style = "flex: 1; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; transition: border-color 0.2s;"
-                            placeholder = "Search movies..."
+                            style = """
+                                width: 100%;
+                                padding: 10px 14px;
+                                font-size: 14px;
+                                border: 1px solid #dadce0;
+                                border-radius: 8px;
+                                box-sizing: border-box;
+                                font-family: 'Roboto', arial, sans-serif;
+                                transition: border-color 0.2s, box-shadow 0.2s;
+                                background-color: white;
+                            """.trimIndent()
+                            placeholder = "Search by title..."
                             value = searchText
-                            attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.outline='none'"
-                            attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                            attributes["onfocus"] = "this.style.borderColor='#1a73e8'; this.style.boxShadow='0 0 0 3px rgba(26,115,232,0.1)'; this.style.outline='none'"
+                            attributes["onblur"] = "this.style.borderColor='#dadce0'; this.style.boxShadow='none'"
                             onInputFunction = { event ->
                                 searchText = (event.target as HTMLInputElement).value
                             }
@@ -186,122 +229,457 @@ class MovieTable(private val container: Element) {
                                 mainScope.launch { loadMovies() }
                             }
                         }
+                    }
+
+                    // Sort controls
+                    div {
+                        style = "display: flex; gap: 8px; align-items: flex-end;"
+
+                        div {
+                            label {
+                                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                                +"↕ Sort by"
+                            }
+                            select {
+                                id = "sort-field-select"
+                                style = """
+                                    padding: 10px 14px;
+                                    font-size: 14px;
+                                    border: 1px solid #dadce0;
+                                    border-radius: 8px;
+                                    background-color: white;
+                                    cursor: pointer;
+                                    font-family: 'Roboto', arial, sans-serif;
+                                    min-width: 140px;
+                                """.trimIndent()
+                                onChangeFunction = { event ->
+                                    val select = event.target as HTMLSelectElement
+                                    sortField = when (select.value) {
+                                        "title" -> SortField.TITLE
+                                        "release_date" -> SortField.RELEASE_DATE
+                                        "date_added" -> SortField.DATE_ADDED
+                                        else -> SortField.TITLE
+                                    }
+                                    currentPage = 1
+                                    mainScope.launch { loadMovies() }
+                                }
+
+                                option {
+                                    value = "title"
+                                    selected = sortField == SortField.TITLE
+                                    +"Title"
+                                }
+                                option {
+                                    value = "release_date"
+                                    selected = sortField == SortField.RELEASE_DATE
+                                    +"Release Year"
+                                }
+                                option {
+                                    value = "date_added"
+                                    selected = sortField == SortField.DATE_ADDED
+                                    +"Date Added"
+                                }
+                            }
+                        }
+
                         button {
-                            id = "reset-filters-button"
+                            id = "sort-direction-btn"
                             style = """
-                                padding: 10px 16px;
-                                font-size: 14px;
+                                padding: 10px 14px;
+                                font-size: 16px;
                                 cursor: pointer;
-                                background-color: #f1f3f4;
+                                background-color: white;
                                 color: #5f6368;
                                 border: 1px solid #dadce0;
-                                border-radius: 4px;
+                                border-radius: 8px;
+                                transition: background-color 0.2s;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#f1f3f4'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                            +(if (sortDirection == SortDirection.ASC) "↑" else "↓")
+                            onClickFunction = {
+                                sortDirection = if (sortDirection == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+                    }
+                }
+
+                // Row 2: Filter dropdowns (responsive grid)
+                div {
+                    style = """
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                        gap: 12px;
+                        margin-bottom: 16px;
+                    """.trimIndent()
+
+                    // Genre multi-select dropdown
+                    renderMultiSelectDropdown(
+                        id = "genre",
+                        label = "🎭 Genres",
+                        options = allGenres,
+                        selectedOptions = selectedGenres,
+                        isOpen = genreDropdownOpen,
+                        onToggle = {
+                            genreDropdownOpen = !genreDropdownOpen
+                            countryDropdownOpen = false
+                            mediaTypeDropdownOpen = false
+                            renderFilters()
+                        },
+                        onOptionToggle = { option ->
+                            if (selectedGenres.contains(option)) {
+                                selectedGenres.remove(option)
+                            } else {
+                                selectedGenres.add(option)
+                            }
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onClear = {
+                            selectedGenres.clear()
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        }
+                    )
+
+                    // Country multi-select dropdown
+                    renderMultiSelectDropdown(
+                        id = "country",
+                        label = "🌍 Countries",
+                        options = allCountries,
+                        selectedOptions = selectedCountries,
+                        isOpen = countryDropdownOpen,
+                        onToggle = {
+                            countryDropdownOpen = !countryDropdownOpen
+                            genreDropdownOpen = false
+                            mediaTypeDropdownOpen = false
+                            renderFilters()
+                        },
+                        onOptionToggle = { option ->
+                            if (selectedCountries.contains(option)) {
+                                selectedCountries.remove(option)
+                            } else {
+                                selectedCountries.add(option)
+                            }
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onClear = {
+                            selectedCountries.clear()
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        }
+                    )
+
+                    // Media Type multi-select dropdown
+                    renderMultiSelectDropdown(
+                        id = "media-type",
+                        label = "💿 Media Type",
+                        options = allMediaTypes,
+                        selectedOptions = selectedMediaTypes,
+                        isOpen = mediaTypeDropdownOpen,
+                        onToggle = {
+                            mediaTypeDropdownOpen = !mediaTypeDropdownOpen
+                            genreDropdownOpen = false
+                            countryDropdownOpen = false
+                            renderFilters()
+                        },
+                        onOptionToggle = { option ->
+                            if (selectedMediaTypes.contains(option)) {
+                                selectedMediaTypes.remove(option)
+                            } else {
+                                selectedMediaTypes.add(option)
+                            }
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onClear = {
+                            selectedMediaTypes.clear()
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        }
+                    )
+                }
+
+                // Row 3: Active filters display and reset button
+                val hasActiveFilters = searchText.isNotBlank() || selectedGenres.isNotEmpty() || 
+                    selectedCountries.isNotEmpty() || selectedMediaTypes.isNotEmpty()
+
+                if (hasActiveFilters) {
+                    div {
+                        style = """
+                            display: flex;
+                            flex-wrap: wrap;
+                            align-items: center;
+                            gap: 8px;
+                            padding-top: 12px;
+                            border-top: 1px solid #e8eaed;
+                        """.trimIndent()
+
+                        span {
+                            style = "font-size: 13px; color: #5f6368; font-weight: 500;"
+                            +"Active filters:"
+                        }
+
+                        // Show selected genre tags
+                        selectedGenres.forEach { genre ->
+                            renderFilterTag(genre, "#e8f0fe", "#1967d2") {
+                                selectedGenres.remove(genre)
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Show selected country tags
+                        selectedCountries.forEach { country ->
+                            renderFilterTag(country, "#e6f4ea", "#137333") {
+                                selectedCountries.remove(country)
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Show selected media type tags
+                        selectedMediaTypes.forEach { mediaType ->
+                            renderFilterTag(mediaType, "#fef7e0", "#b06000") {
+                                selectedMediaTypes.remove(mediaType)
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Search text tag
+                        if (searchText.isNotBlank()) {
+                            renderFilterTag("\"$searchText\"", "#f3e5f5", "#6a1b9a") {
+                                searchText = ""
+                                (document.getElementById("search-input") as? HTMLInputElement)?.value = ""
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Clear all button
+                        button {
+                            style = """
+                                padding: 6px 12px;
+                                font-size: 12px;
+                                cursor: pointer;
+                                background-color: #d93025;
+                                color: white;
+                                border: none;
+                                border-radius: 16px;
                                 font-weight: 500;
                                 transition: background-color 0.2s;
-                                white-space: nowrap;
+                                margin-left: auto;
                             """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
-                            +"Reset All"
+                            attributes["onmouseover"] = "this.style.backgroundColor='#c5221f'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='#d93025'"
+                            +"✕ Clear All"
                             onClickFunction = {
                                 resetAllFilters()
                             }
                         }
                     }
                 }
+            }
 
-                // Genre filter (single select for server-side filtering)
-                div {
-                    label {
-                        htmlFor = "genre-select"
-                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                        +"Filter by Genre"
-                    }
-                    select {
-                        id = "genre-select"
-                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                        onChangeFunction = { event ->
-                            val select = event.target as HTMLSelectElement
-                            selectedGenre = select.value.takeIf { it.isNotBlank() }
-                            currentPage = 1
-                            mainScope.launch { loadMovies() }
-                        }
-
-                        option {
-                            value = ""
-                            selected = selectedGenre == null
-                            +"All Genres"
-                        }
-                        allGenres.forEach { genre ->
-                            option {
-                                value = genre
-                                selected = selectedGenre == genre
-                                +genre
+            // Add responsive CSS via style tag
+            style {
+                unsafe {
+                    +"""
+                        @media (max-width: 768px) {
+                            .filter-row-1 {
+                                grid-template-columns: 1fr !important;
                             }
                         }
+                    """.trimIndent()
+                }
+            }
+        }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener("click", { event ->
+            val target = event.target as? Element
+            if (target != null) {
+                val isInsideDropdown = target.closest(".multi-select-dropdown") != null
+                if (!isInsideDropdown && (genreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
+                    genreDropdownOpen = false
+                    countryDropdownOpen = false
+                    mediaTypeDropdownOpen = false
+                    renderFilters()
+                }
+            }
+        })
+    }
+
+    private fun DIV.renderMultiSelectDropdown(
+        id: String,
+        label: String,
+        options: List<String>,
+        selectedOptions: Set<String>,
+        isOpen: Boolean,
+        onToggle: () -> Unit,
+        onOptionToggle: (String) -> Unit,
+        onClear: () -> Unit
+    ) {
+        div {
+            style = "position: relative;"
+            attributes["class"] = "multi-select-dropdown"
+
+            label {
+                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                +label
+            }
+
+            // Dropdown trigger button
+            div {
+                style = """
+                    padding: 10px 14px;
+                    font-size: 14px;
+                    border: 1px solid ${if (isOpen) "#1a73e8" else "#dadce0"};
+                    border-radius: 8px;
+                    background-color: white;
+                    cursor: pointer;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    transition: border-color 0.2s;
+                    ${if (isOpen) "box-shadow: 0 0 0 3px rgba(26,115,232,0.1);" else ""}
+                """.trimIndent()
+                attributes["onmouseover"] = if (!isOpen) "this.style.borderColor='#bdc1c6'" else ""
+                attributes["onmouseout"] = if (!isOpen) "this.style.borderColor='#dadce0'" else ""
+                onClickFunction = { event ->
+                    event.stopPropagation()
+                    onToggle()
+                }
+
+                span {
+                    style = "color: ${if (selectedOptions.isEmpty()) "#5f6368" else "#202124"}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    if (selectedOptions.isEmpty()) {
+                        +"All"
+                    } else if (selectedOptions.size <= 2) {
+                        +selectedOptions.joinToString(", ")
+                    } else {
+                        +"${selectedOptions.size} selected"
                     }
                 }
 
-                // Country filter (single select for server-side filtering)
-                div {
-                    label {
-                        htmlFor = "country-select"
-                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                        +"Filter by Country"
-                    }
-                    select {
-                        id = "country-select"
-                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                        onChangeFunction = { event ->
-                            val select = event.target as HTMLSelectElement
-                            selectedCountry = select.value.takeIf { it.isNotBlank() }
-                            currentPage = 1
-                            mainScope.launch { loadMovies() }
-                        }
-
-                        option {
-                            value = ""
-                            selected = selectedCountry == null
-                            +"All Countries"
-                        }
-                        allCountries.forEach { country ->
-                            option {
-                                value = country
-                                selected = selectedCountry == country
-                                +country
-                            }
-                        }
-                    }
+                span {
+                    style = "color: #5f6368; font-size: 12px; margin-left: 8px; flex-shrink: 0;"
+                    +(if (isOpen) "▲" else "▼")
                 }
+            }
 
-                // Media Type filter (single select for server-side filtering)
+            // Dropdown menu
+            if (isOpen) {
                 div {
-                    label {
-                        htmlFor = "media-type-select"
-                        style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                        +"Filter by Media Type"
+                    style = """
+                        position: absolute;
+                        top: 100%;
+                        left: 0;
+                        right: 0;
+                        margin-top: 4px;
+                        background-color: white;
+                        border: 1px solid #dadce0;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        z-index: 100;
+                        max-height: 280px;
+                        overflow-y: auto;
+                    """.trimIndent()
+                    onClickFunction = { event ->
+                        event.stopPropagation()
                     }
-                    select {
-                        id = "media-type-select"
-                        style = "width: 100%; padding: 10px 12px; font-size: 14px; border: 1px solid #dadce0; border-radius: 4px; box-sizing: border-box; font-family: 'Roboto', arial, sans-serif; background-color: #ffffff;"
-                        onChangeFunction = { event ->
-                            val select = event.target as HTMLSelectElement
-                            selectedMediaType = select.value.takeIf { it.isNotBlank() }
-                            currentPage = 1
-                            mainScope.launch { loadMovies() }
-                        }
 
-                        option {
-                            value = ""
-                            selected = selectedMediaType == null
-                            +"All Media Types"
-                        }
-                        allMediaTypes.forEach { mediaType ->
-                            option {
-                                value = mediaType
-                                selected = selectedMediaType == mediaType
-                                +mediaType
+                    // Clear selection option
+                    if (selectedOptions.isNotEmpty()) {
+                        div {
+                            style = """
+                                padding: 10px 14px;
+                                font-size: 13px;
+                                color: #d93025;
+                                cursor: pointer;
+                                border-bottom: 1px solid #e8eaed;
+                                font-weight: 500;
+                                transition: background-color 0.15s;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                            +"✕ Clear selection"
+                            onClickFunction = { event ->
+                                event.stopPropagation()
+                                onClear()
                             }
+                        }
+                    }
+
+                    // Options list
+                    options.forEach { option ->
+                        val isSelected = selectedOptions.contains(option)
+                        div {
+                            style = """
+                                padding: 10px 14px;
+                                font-size: 14px;
+                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                gap: 10px;
+                                transition: background-color 0.15s;
+                                ${if (isSelected) "background-color: #e8f0fe;" else ""}
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='${if (isSelected) "#d2e3fc" else "#f8f9fa"}'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='${if (isSelected) "#e8f0fe" else "white"}'"
+                            onClickFunction = { event ->
+                                event.stopPropagation()
+                                onOptionToggle(option)
+                            }
+
+                            // Checkbox
+                            div {
+                                style = """
+                                    width: 18px;
+                                    height: 18px;
+                                    border: 2px solid ${if (isSelected) "#1a73e8" else "#5f6368"};
+                                    border-radius: 4px;
+                                    background-color: ${if (isSelected) "#1a73e8" else "white"};
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    flex-shrink: 0;
+                                """.trimIndent()
+
+                                if (isSelected) {
+                                    span {
+                                        style = "color: white; font-size: 12px; font-weight: bold;"
+                                        +"✓"
+                                    }
+                                }
+                            }
+
+                            span {
+                                style = "color: #202124;"
+                                +option
+                            }
+                        }
+                    }
+
+                    if (options.isEmpty()) {
+                        div {
+                            style = "padding: 16px; text-align: center; color: #5f6368; font-size: 13px;"
+                            +"No options available"
                         }
                     }
                 }
@@ -309,19 +687,130 @@ class MovieTable(private val container: Element) {
         }
     }
 
+    private fun DIV.renderFilterTag(text: String, bgColor: String, textColor: String, onRemove: () -> Unit) {
+        span {
+            style = """
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+                padding: 4px 10px;
+                background-color: $bgColor;
+                color: $textColor;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: 500;
+            """.trimIndent()
+
+            +text
+
+            span {
+                style = """
+                    cursor: pointer;
+                    font-size: 14px;
+                    line-height: 1;
+                    opacity: 0.7;
+                    transition: opacity 0.15s;
+                """.trimIndent()
+                attributes["onmouseover"] = "this.style.opacity='1'"
+                attributes["onmouseout"] = "this.style.opacity='0.7'"
+                +"×"
+                onClickFunction = { onRemove() }
+            }
+        }
+    }
+
+    private fun applyFiltersAndSort() {
+        // Apply client-side filtering
+        var filtered = currentMovies.toList()
+
+        // Filter by search text
+        if (searchText.isNotBlank()) {
+            val lowerSearch = searchText.lowercase()
+            filtered = filtered.filter { movie ->
+                movie.title.lowercase().contains(lowerSearch) ||
+                movie.alternateTitles.any { it.lowercase().contains(lowerSearch) }
+            }
+        }
+
+        // Filter by genres (movie must have ALL selected genres)
+        if (selectedGenres.isNotEmpty()) {
+            filtered = filtered.filter { movie ->
+                selectedGenres.all { genre -> movie.genres.contains(genre) }
+            }
+        }
+
+        // Filter by countries (movie must have ANY of the selected countries)
+        if (selectedCountries.isNotEmpty()) {
+            filtered = filtered.filter { movie ->
+                movie.country.any { country -> selectedCountries.contains(country) }
+            }
+        }
+
+        // Filter by media types (movie must have ANY of the selected media types)
+        if (selectedMediaTypes.isNotEmpty()) {
+            filtered = filtered.filter { movie ->
+                movie.physicalMedia.any { media ->
+                    media.mediaTypes.any { type ->
+                        val typeStr = when (type) {
+                            MediaType.VHS -> "VHS"
+                            MediaType.DVD -> "DVD"
+                            MediaType.BLURAY -> "Blu-ray"
+                            MediaType.FOURK -> "4K"
+                            MediaType.DIGITAL -> "Digital"
+                        }
+                        selectedMediaTypes.contains(typeStr)
+                    }
+                }
+            }
+        }
+
+        // Apply sorting
+        filtered = when (sortField) {
+            SortField.TITLE -> {
+                if (sortDirection == SortDirection.ASC) {
+                    filtered.sortedBy { it.title.lowercase() }
+                } else {
+                    filtered.sortedByDescending { it.title.lowercase() }
+                }
+            }
+            SortField.RELEASE_DATE -> {
+                if (sortDirection == SortDirection.ASC) {
+                    filtered.sortedBy { it.release_date ?: Int.MAX_VALUE }
+                } else {
+                    filtered.sortedByDescending { it.release_date ?: Int.MIN_VALUE }
+                }
+            }
+            SortField.DATE_ADDED -> {
+                if (sortDirection == SortDirection.ASC) {
+                    filtered.sortedBy { it.createdAt ?: "" }
+                } else {
+                    filtered.sortedByDescending { it.createdAt ?: "" }
+                }
+            }
+        }
+
+        displayedMovies = filtered
+        renderCards()
+    }
+
     private fun resetAllFilters() {
         searchText = ""
-        selectedGenre = null
-        selectedCountry = null
-        selectedMediaType = null
+        selectedGenres.clear()
+        selectedCountries.clear()
+        selectedMediaTypes.clear()
+        sortField = SortField.TITLE
+        sortDirection = SortDirection.ASC
         currentPage = 1
+
+        // Close all dropdowns
+        genreDropdownOpen = false
+        countryDropdownOpen = false
+        mediaTypeDropdownOpen = false
 
         // Update UI
         (document.getElementById("search-input") as? HTMLInputElement)?.value = ""
-        (document.getElementById("genre-select") as? HTMLSelectElement)?.value = ""
-        (document.getElementById("country-select") as? HTMLSelectElement)?.value = ""
-        (document.getElementById("media-type-select") as? HTMLSelectElement)?.value = ""
 
+        renderFilters()
         mainScope.launch { loadMovies() }
     }
 
@@ -332,21 +821,43 @@ class MovieTable(private val container: Element) {
         showLoadingState()
 
         try {
-            val response = fetchMoviesPaginated(
-                page = currentPage,
-                pageSize = itemsPerPage,
-                search = searchText.takeIf { it.isNotBlank() },
-                genre = selectedGenre,
-                country = selectedCountry,
-                mediaType = selectedMediaType
-            )
+            // Check if we need client-side filtering (multi-select active)
+            val needsClientSideFiltering = selectedGenres.size > 1 || 
+                selectedCountries.size > 1 || 
+                selectedMediaTypes.size > 1 ||
+                sortField != SortField.TITLE ||
+                sortDirection != SortDirection.ASC
 
-            currentMovies = response.movies
-            totalCount = response.totalCount
-            totalPages = response.totalPages
-            currentPage = response.page
-
-            renderTable()
+            if (needsClientSideFiltering) {
+                // Load all movies for client-side filtering when multi-select is active
+                val response = fetchMoviesPaginated(
+                    page = 1,
+                    pageSize = 10000,
+                    search = null,
+                    genre = null,
+                    country = null,
+                    mediaType = null
+                )
+                currentMovies = response.movies
+                totalCount = response.totalCount
+                applyFiltersAndSort()
+            } else {
+                // Use fast server-side pagination for simple cases
+                val response = fetchMoviesPaginated(
+                    page = currentPage,
+                    pageSize = itemsPerPage,
+                    search = searchText.takeIf { it.isNotBlank() },
+                    genre = selectedGenres.firstOrNull(),
+                    country = selectedCountries.firstOrNull(),
+                    mediaType = selectedMediaTypes.firstOrNull()
+                )
+                currentMovies = response.movies
+                displayedMovies = response.movies
+                totalCount = response.totalCount
+                totalPages = response.totalPages
+                currentPage = response.page
+                renderCards()
+            }
         } catch (e: Exception) {
             console.error("Failed to load movies:", e)
             showErrorState("Failed to load movies: ${e.message}")
@@ -356,20 +867,24 @@ class MovieTable(private val container: Element) {
     }
 
     private fun showLoadingState() {
-        val tableContainer = document.getElementById("table-container") ?: return
-        tableContainer.innerHTML = ""
-        tableContainer.append {
+        val cardsContainer = document.getElementById("cards-container") ?: return
+        cardsContainer.innerHTML = ""
+        cardsContainer.append {
             div {
-                style = "text-align: center; padding: 40px; color: #5f6368;"
+                style = "text-align: center; padding: 60px; color: #5f6368;"
+                div {
+                    style = "font-size: 48px; margin-bottom: 16px; animation: pulse 1.5s ease-in-out infinite;"
+                    +"🎬"
+                }
                 +"Loading movies..."
             }
         }
     }
 
     private fun showErrorState(message: String) {
-        val tableContainer = document.getElementById("table-container") ?: return
-        tableContainer.innerHTML = ""
-        tableContainer.append {
+        val cardsContainer = document.getElementById("cards-container") ?: return
+        cardsContainer.innerHTML = ""
+        cardsContainer.append {
             div {
                 style = "text-align: center; padding: 40px; color: #d93025; background-color: #fce8e6; border-radius: 8px;"
                 +message
@@ -377,146 +892,237 @@ class MovieTable(private val container: Element) {
         }
     }
 
-    private fun renderTable() {
-        // Update count
+    private fun renderCards() {
+        // Calculate pagination for displayed (filtered) movies
+        val filteredCount = displayedMovies.size
+        totalPages = if (filteredCount == 0) 1 else (filteredCount + itemsPerPage - 1) / itemsPerPage
+        if (currentPage > totalPages) currentPage = totalPages
+
+        val startIndex = (currentPage - 1) * itemsPerPage
+        val endIndex = kotlin.math.min(startIndex + itemsPerPage, filteredCount)
+        val paginatedMovies = if (filteredCount > 0) displayedMovies.subList(startIndex, endIndex) else emptyList()
+
+        // Update count display
         val countDiv = document.getElementById("results-count")
-        val startIndex = (currentPage - 1) * itemsPerPage + 1
-        val endIndex = kotlin.math.min(currentPage * itemsPerPage, totalCount)
-        if (totalCount > 0) {
-            countDiv?.textContent = "Showing $startIndex-$endIndex of $totalCount movies"
+        if (filteredCount > 0) {
+            countDiv?.textContent = "Showing ${startIndex + 1}-$endIndex of $filteredCount movies"
         } else {
             countDiv?.textContent = "No movies found"
         }
         countDiv?.setAttribute("style", "margin-bottom: 16px; font-size: 14px; color: #5f6368; font-family: 'Roboto', arial, sans-serif;")
 
-        // Update table
-        val tableContainer = document.getElementById("table-container") ?: return
-        tableContainer.innerHTML = ""
-        tableContainer.append {
-            if (currentMovies.isEmpty()) {
+        // Update cards
+        val cardsContainer = document.getElementById("cards-container") ?: return
+        cardsContainer.innerHTML = ""
+        cardsContainer.append {
+            if (paginatedMovies.isEmpty()) {
                 div {
-                    style = "text-align: center; padding: 40px; color: #5f6368; background-color: #f8f9fa; border-radius: 8px;"
+                    style = "text-align: center; padding: 60px; color: #5f6368; background-color: #f8f9fa; border-radius: 12px;"
+                    div {
+                        style = "font-size: 48px; margin-bottom: 16px;"
+                        +"🎬"
+                    }
                     +"No movies match your search criteria."
                 }
             } else {
-                table {
-                    style = "width: 100%; border-collapse: collapse; background-color: white; border: 1px solid #dadce0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);"
+                // Cards grid
+                div {
+                    style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px;"
 
-                    thead {
-                        style = "background-color: #f8f9fa; color: #202124; border-bottom: 1px solid #dadce0;"
-                        tr {
-                            th {
-                                style = "padding: 12px 16px; text-align: left; font-weight: 500; font-size: 14px; color: #5f6368;"
-                                +"Title"
-                            }
-                            th {
-                                style = "padding: 12px 16px; text-align: left; font-weight: 500; font-size: 14px; color: #5f6368;"
-                                +"Physical Media"
-                            }
-                            th {
-                                style = "padding: 12px 16px; text-align: center; font-weight: 500; font-size: 14px; color: #5f6368; width: 180px;"
-                                +"Actions"
-                            }
-                        }
-                    }
+                    paginatedMovies.forEach { movie ->
+                        // Movie card
+                        div {
+                            style = """
+                                background: linear-gradient(145deg, #ffffff 0%, #fafbfc 100%);
+                                border-radius: 12px;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+                                overflow: hidden;
+                                transition: transform 0.2s ease, box-shadow 0.2s ease;
+                                display: flex;
+                                flex-direction: column;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.transform='translateY(-4px)'; this.style.boxShadow='0 8px 24px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.08)'"
+                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)'"
 
-                    tbody {
-                        currentMovies.forEach { movie ->
-                            tr {
-                                style = "border-bottom: 1px solid #e8eaed;"
-                                attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
-                                attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
+                            // Card header with title and year
+                            div {
+                                style = """
+                                    padding: 20px 20px 16px 20px;
+                                    background: linear-gradient(135deg, #1a73e8 0%, #1557b0 100%);
+                                    color: white;
+                                    cursor: pointer;
+                                """.trimIndent()
+                                onClickFunction = {
+                                    metadataModal.show(movie)
+                                }
 
-                                td {
-                                    style = "padding: 12px 16px; cursor: pointer;"
-                                    onClickFunction = {
-                                        metadataModal.show(movie)
+                                // Title
+                                h3 {
+                                    style = "margin: 0 0 8px 0; font-size: 18px; font-weight: 500; line-height: 1.3; font-family: 'Google Sans', 'Roboto', sans-serif;"
+                                    +movie.title
+                                }
+
+                                // Year and runtime row
+                                div {
+                                    style = "display: flex; align-items: center; gap: 12px; font-size: 13px; opacity: 0.9;"
+                                    if (movie.release_date != null) {
+                                        span {
+                                            style = "display: flex; align-items: center; gap: 4px;"
+                                            +"📅 ${movie.release_date}"
+                                        }
                                     }
+                                    if (movie.runtime_mins != null) {
+                                        span {
+                                            style = "display: flex; align-items: center; gap: 4px;"
+                                            val hours = movie.runtime_mins / 60
+                                            val mins = movie.runtime_mins % 60
+                                            val runtimeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                                            +"⏱ $runtimeStr"
+                                        }
+                                    }
+                                }
 
+                                // Date added (createdAt)
+                                if (!movie.createdAt.isNullOrBlank()) {
                                     div {
-                                        style = "color: #1a73e8; font-size: 14px; margin-bottom: 4px;"
-                                        attributes["onmouseover"] = "this.style.textDecoration='underline'"
-                                        attributes["onmouseout"] = "this.style.textDecoration='none'"
-                                        +movie.title
+                                        style = "font-size: 11px; opacity: 0.75; margin-top: 6px;"
+                                        val dateAdded = movie.createdAt.substringBefore("T") // Extract date part from ISO datetime
+                                        +"Added: $dateAdded"
                                     }
                                 }
-                                td {
-                                    style = "padding: 12px 16px;"
-                                    movie.physicalMedia.forEach { media ->
-                                        if (media.entryLetter != null) {
+                            }
+
+                            // Card body
+                            div {
+                                style = "padding: 16px 20px; flex: 1; display: flex; flex-direction: column; gap: 12px;"
+
+                                // Genres
+                                if (movie.genres.isNotEmpty()) {
+                                    div {
+                                        style = "display: flex; flex-wrap: wrap; gap: 6px;"
+                                        movie.genres.take(4).forEach { genre ->
                                             span {
-                                                style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #f1f3f4; color: #202124; border-radius: 4px; font-size: 11px; font-weight: 600; font-family: 'Roboto', arial, sans-serif;"
-                                                +media.entryLetter
+                                                style = "display: inline-block; padding: 4px 10px; background-color: #e8f0fe; color: #1967d2; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                                +genre
                                             }
                                         }
-                                        if (media.title != null) {
+                                        if (movie.genres.size > 4) {
                                             span {
-                                                style = "display: inline-block; padding: 4px 8px; margin-right: 4px; margin-bottom: 4px; background-color: #e8f0fe; color: #1967d2; border-radius: 4px; font-size: 11px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
-                                                +media.title
-                                            }
-                                        }
-                                        media.mediaTypes.forEach { type ->
-                                            val mediaLabel = when (type) {
-                                                MediaType.VHS -> "VHS"
-                                                MediaType.DVD -> "DVD"
-                                                MediaType.BLURAY -> "Blu-ray"
-                                                MediaType.FOURK -> "4K"
-                                                MediaType.DIGITAL -> "Digital"
-                                            }
-                                            val badgeColor = when (type) {
-                                                MediaType.VHS -> "background-color: #e8f5e9; color: #1e8e3e;"
-                                                MediaType.DVD -> "background-color: #e3f2fd; color: #1565c0;"
-                                                MediaType.BLURAY -> "background-color: #f3e5f5; color: #6a1b9a;"
-                                                MediaType.FOURK -> "background-color: #fff3e0; color: #e65100;"
-                                                MediaType.DIGITAL -> "background-color: #fce4ec; color: #c2185b;"
-                                            }
-                                            span {
-                                                style = "display: inline-block; padding: 4px 10px; margin-right: 6px; margin-bottom: 4px; $badgeColor border-radius: 12px; font-size: 12px; font-weight: 500; font-family: 'Roboto', arial, sans-serif;"
-                                                +mediaLabel
+                                                style = "display: inline-block; padding: 4px 10px; background-color: #f1f3f4; color: #5f6368; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                                +"+${movie.genres.size - 4}"
                                             }
                                         }
                                     }
                                 }
-                                td {
-                                    style = "padding: 12px 16px; text-align: center;"
-                                    button {
-                                        style = """
-                                            padding: 6px 16px;
-                                            margin-right: 8px;
-                                            font-size: 13px;
-                                            cursor: pointer;
-                                            background-color: #ffffff;
-                                            color: #1a73e8;
-                                            border: 1px solid #dadce0;
-                                            border-radius: 4px;
-                                            font-weight: 500;
-                                            transition: background-color 0.2s;
-                                        """.trimIndent()
-                                        attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
-                                        attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                                        +"Edit"
-                                        onClickFunction = {
-                                            showEditMovieForm(movie)
+
+                                // Countries
+                                if (movie.country.isNotEmpty()) {
+                                    div {
+                                        style = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5f6368;"
+                                        span { +"🌍" }
+                                        span {
+                                            +movie.country.take(3).joinToString(" • ")
+                                            if (movie.country.size > 3) {
+                                                +" +${movie.country.size - 3}"
+                                            }
                                         }
                                     }
-                                    button {
+                                }
+
+                                // Description preview
+                                if (!movie.description.isNullOrBlank()) {
+                                    p {
                                         style = """
-                                            padding: 6px 16px;
+                                            margin: 0;
                                             font-size: 13px;
-                                            cursor: pointer;
-                                            background-color: #ffffff;
-                                            color: #d93025;
-                                            border: 1px solid #dadce0;
-                                            border-radius: 4px;
-                                            font-weight: 500;
-                                            transition: background-color 0.2s;
+                                            color: #5f6368;
+                                            line-height: 1.5;
+                                            display: -webkit-box;
+                                            -webkit-line-clamp: 2;
+                                            -webkit-box-orient: vertical;
+                                            overflow: hidden;
+                                            text-overflow: ellipsis;
                                         """.trimIndent()
-                                        attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
-                                        attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                                        +"Delete"
-                                        onClickFunction = {
-                                            handleDeleteMovie(movie)
+                                        +movie.description
+                                    }
+                                }
+
+                                // Physical media badges
+                                if (movie.physicalMedia.isNotEmpty()) {
+                                    div {
+                                        style = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid #e8eaed;"
+                                        movie.physicalMedia.forEach { media ->
+                                            if (media.entryLetter != null) {
+                                                span {
+                                                    style = "display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background-color: #202124; color: white; border-radius: 4px; font-size: 10px; font-weight: 600;"
+                                                    +media.entryLetter
+                                                }
+                                            }
+                                            media.mediaTypes.forEach { type ->
+                                                val mediaLabel = when (type) {
+                                                    MediaType.VHS -> "VHS"
+                                                    MediaType.DVD -> "DVD"
+                                                    MediaType.BLURAY -> "Blu-ray"
+                                                    MediaType.FOURK -> "4K"
+                                                    MediaType.DIGITAL -> "Digital"
+                                                }
+                                                val badgeStyle = when (type) {
+                                                    MediaType.VHS -> "background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); color: #1e8e3e;"
+                                                    MediaType.DVD -> "background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0;"
+                                                    MediaType.BLURAY -> "background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); color: #6a1b9a;"
+                                                    MediaType.FOURK -> "background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); color: #e65100;"
+                                                    MediaType.DIGITAL -> "background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%); color: #c2185b;"
+                                                }
+                                                span {
+                                                    style = "display: inline-block; padding: 4px 10px; $badgeStyle border-radius: 12px; font-size: 11px; font-weight: 600;"
+                                                    +mediaLabel
+                                                }
+                                            }
                                         }
+                                    }
+                                }
+                            }
+
+                            // Card actions
+                            div {
+                                style = "padding: 12px 20px; background-color: #f8f9fa; border-top: 1px solid #e8eaed; display: flex; justify-content: flex-end; gap: 8px;"
+
+                                button {
+                                    style = """
+                                        padding: 8px 16px;
+                                        font-size: 13px;
+                                        cursor: pointer;
+                                        background-color: transparent;
+                                        color: #1a73e8;
+                                        border: none;
+                                        border-radius: 4px;
+                                        font-weight: 500;
+                                        transition: background-color 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='#e8f0fe'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+                                    +"Edit"
+                                    onClickFunction = {
+                                        showEditMovieForm(movie)
+                                    }
+                                }
+                                button {
+                                    style = """
+                                        padding: 8px 16px;
+                                        font-size: 13px;
+                                        cursor: pointer;
+                                        background-color: transparent;
+                                        color: #d93025;
+                                        border: none;
+                                        border-radius: 4px;
+                                        font-weight: 500;
+                                        transition: background-color 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+                                    +"Delete"
+                                    onClickFunction = {
+                                        handleDeleteMovie(movie)
                                     }
                                 }
                             }
@@ -526,88 +1132,95 @@ class MovieTable(private val container: Element) {
             }
 
             // Pagination controls
-            if (totalPages > 1 || totalCount > 0) {
+            if (totalPages > 1 || filteredCount > 0) {
                 div {
-                    style = "margin-top: 20px; display: flex; justify-content: center; align-items: center; gap: 8px;"
+                    style = """
+                        margin-top: 32px;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        gap: 8px;
+                        flex-wrap: wrap;
+                    """.trimIndent()
 
                     // Previous button
                     button {
                         style = """
-                            padding: 8px 16px;
+                            padding: 10px 20px;
                             font-size: 14px;
                             cursor: ${if (currentPage > 1) "pointer" else "not-allowed"};
                             background-color: ${if (currentPage > 1) "#1a73e8" else "#dadce0"};
                             color: ${if (currentPage > 1) "white" else "#5f6368"};
                             border: none;
-                            border-radius: 4px;
+                            border-radius: 24px;
                             font-weight: 500;
-                            transition: background-color 0.2s;
+                            transition: all 0.2s;
                         """.trimIndent()
                         disabled = (currentPage <= 1)
                         if (currentPage > 1) {
-                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'"
+                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
                         }
                         +"← Previous"
                         onClickFunction = {
                             if (currentPage > 1) {
                                 currentPage--
-                                mainScope.launch { loadMovies() }
+                                renderCards()
                             }
                         }
                     }
 
                     // Page info
                     span {
-                        style = "padding: 8px 16px; font-size: 14px; color: #5f6368;"
+                        style = "padding: 10px 20px; font-size: 14px; color: #5f6368; background-color: white; border-radius: 24px; border: 1px solid #dadce0;"
                         +"Page $currentPage of $totalPages"
                     }
 
                     // Next button
                     button {
                         style = """
-                            padding: 8px 16px;
+                            padding: 10px 20px;
                             font-size: 14px;
                             cursor: ${if (currentPage < totalPages) "pointer" else "not-allowed"};
                             background-color: ${if (currentPage < totalPages) "#1a73e8" else "#dadce0"};
                             color: ${if (currentPage < totalPages) "white" else "#5f6368"};
                             border: none;
-                            border-radius: 4px;
+                            border-radius: 24px;
                             font-weight: 500;
-                            transition: background-color 0.2s;
+                            transition: all 0.2s;
                         """.trimIndent()
                         disabled = (currentPage >= totalPages)
                         if (currentPage < totalPages) {
-                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'"
+                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
                         }
                         +"Next →"
                         onClickFunction = {
                             if (currentPage < totalPages) {
                                 currentPage++
-                                mainScope.launch { loadMovies() }
+                                renderCards()
                             }
                         }
                     }
 
                     // Items per page selector
                     div {
-                        style = "margin-left: 24px; display: flex; align-items: center; gap: 8px;"
+                        style = "margin-left: 16px; display: flex; align-items: center; gap: 8px;"
                         span {
-                            style = "font-size: 14px; color: #5f6368;"
-                            +"Items per page:"
+                            style = "font-size: 13px; color: #5f6368;"
+                            +"Per page:"
                         }
                         select {
                             style = """
-                                padding: 6px 12px;
+                                padding: 8px 14px;
                                 font-size: 14px;
                                 border: 1px solid #dadce0;
-                                border-radius: 4px;
+                                border-radius: 24px;
                                 background-color: white;
                                 cursor: pointer;
                             """.trimIndent()
 
-                            listOf(10, 25, 50, 100).forEach { size ->
+                            listOf(12, 24, 48, 96).forEach { size ->
                                 option {
                                     value = size.toString()
                                     selected = (itemsPerPage == size)
@@ -620,7 +1233,7 @@ class MovieTable(private val container: Element) {
                                 select?.value?.toIntOrNull()?.let { newSize ->
                                     itemsPerPage = newSize
                                     currentPage = 1
-                                    mainScope.launch { loadMovies() }
+                                    renderCards()
                                 }
                             }
                         }
