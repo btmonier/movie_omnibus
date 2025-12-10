@@ -36,8 +36,8 @@ class RandomMoviePicker(
         mainScope.launch {
             // Load filter options
             try {
-                genres = fetchAllGenres().map { it.name }
-                subgenres = fetchAllSubgenres().map { it.name }
+                genres = fetchGenreOptions()
+                subgenres = fetchSubgenreOptions()
                 countries = fetchAllCountries()
                 mediaTypes = fetchAllMediaTypes()
                 updateCount()

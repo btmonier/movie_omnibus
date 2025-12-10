@@ -32,6 +32,8 @@ class MovieDao(gcsService: GcsService? = null) {
      * @param genre Optional genre filter
      * @param country Optional country filter
      * @param mediaType Optional media type filter
+     * @param sortField Field to sort by: "title", "release_date", or "date_added"
+     * @param sortDirection Sort direction: "asc" or "desc"
      * @return Pair of (movies, totalCount)
      */
     suspend fun getMoviesPaginated(
@@ -39,8 +41,11 @@ class MovieDao(gcsService: GcsService? = null) {
         pageSize: Int,
         search: String? = null,
         genre: String? = null,
+        subgenre: String? = null,
         country: String? = null,
-        mediaType: String? = null
+        mediaType: String? = null,
+        sortField: String? = null,
+        sortDirection: String? = null
     ): Pair<List<MovieMetadata>, Int> = DatabaseFactory.dbQuery {
         // Start with all movie IDs
         var candidateMovieIds: Set<Int>? = null
@@ -75,6 +80,23 @@ class MovieDao(gcsService: GcsService? = null) {
                 candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithGenre) ?: movieIdsWithGenre
             } else {
                 // Genre not found, return empty results
+                return@dbQuery Pair(emptyList(), 0)
+            }
+        }
+
+        // Filter by subgenre
+        if (!subgenre.isNullOrBlank()) {
+            val subgenreRow = Subgenres.selectAll().where { Subgenres.name eq subgenre }.singleOrNull()
+            if (subgenreRow != null) {
+                val subgenreId = subgenreRow[Subgenres.id].value
+                val movieIdsWithSubgenre = MovieSubgenres.selectAll()
+                    .where { MovieSubgenres.subgenreId eq subgenreId }
+                    .map { it[MovieSubgenres.movieId].value }
+                    .toSet()
+
+                candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithSubgenre) ?: movieIdsWithSubgenre
+            } else {
+                // Subgenre not found, return empty results
                 return@dbQuery Pair(emptyList(), 0)
             }
         }
@@ -114,10 +136,20 @@ class MovieDao(gcsService: GcsService? = null) {
         // Get total count
         val totalCount = query.count().toInt()
 
-        // Get paginated results (sorted by title)
+        // Determine sort order
+        val order = if (sortDirection?.lowercase() == "desc") SortOrder.DESC else SortOrder.ASC
+        
+        // Determine sort column
+        val sortColumn: Expression<*> = when (sortField?.lowercase()) {
+            "release_date" -> Movies.releaseDate
+            "date_added" -> Movies.createdAt
+            else -> Movies.title // Default to title
+        }
+
+        // Get paginated results with dynamic sorting
         val offset = ((page - 1) * pageSize).toLong()
         val movies = query
-            .orderBy(Movies.title to SortOrder.ASC)
+            .orderBy(sortColumn to order)
             .limit(pageSize)
             .offset(offset)
             .map { rowToMovieMetadata(it) }
@@ -298,19 +330,25 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     /**
-     * Get all unique genres from the database (for autocomplete).
+     * Get all unique genres from the database that are assigned to at least one movie (for filtering).
      */
     suspend fun getAllGenres(): List<String> = DatabaseFactory.dbQuery {
-        Genres.selectAll()
+        // Use JOIN with DISTINCT at SQL level for efficiency
+        (Genres innerJoin MovieGenres)
+            .select(Genres.name)
+            .withDistinct()
             .orderBy(Genres.name to SortOrder.ASC)
             .map { it[Genres.name] }
     }
 
     /**
-     * Get all unique subgenres from the database (for autocomplete).
+     * Get all unique subgenres from the database that are assigned to at least one movie (for filtering).
      */
     suspend fun getAllSubgenres(): List<String> = DatabaseFactory.dbQuery {
-        Subgenres.selectAll()
+        // Use JOIN with DISTINCT at SQL level for efficiency
+        (Subgenres innerJoin MovieSubgenres)
+            .select(Subgenres.name)
+            .withDistinct()
             .orderBy(Subgenres.name to SortOrder.ASC)
             .map { it[Subgenres.name] }
     }

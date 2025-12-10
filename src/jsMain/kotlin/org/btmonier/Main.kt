@@ -73,16 +73,22 @@ suspend fun fetchMoviesPaginated(
     pageSize: Int = 25,
     search: String? = null,
     genre: String? = null,
+    subgenre: String? = null,
     country: String? = null,
-    mediaType: String? = null
+    mediaType: String? = null,
+    sortField: String? = null,
+    sortDirection: String? = null
 ): PaginatedMoviesResponse {
     val params = mutableListOf<String>()
     params.add("page=$page")
     params.add("pageSize=$pageSize")
     search?.let { if (it.isNotBlank()) params.add("search=$it") }
     genre?.let { if (it.isNotBlank()) params.add("genre=$it") }
+    subgenre?.let { if (it.isNotBlank()) params.add("subgenre=$it") }
     country?.let { if (it.isNotBlank()) params.add("country=$it") }
     mediaType?.let { if (it.isNotBlank()) params.add("mediaType=$it") }
+    sortField?.let { if (it.isNotBlank()) params.add("sortField=$it") }
+    sortDirection?.let { if (it.isNotBlank()) params.add("sortDirection=$it") }
 
     val queryString = "?" + params.joinToString("&")
     val response = window.fetch("$API_BASE_URL/movies$queryString").await()
@@ -100,6 +106,15 @@ suspend fun fetchMoviesPaginated(
  */
 suspend fun fetchGenreOptions(): List<String> {
     val response = window.fetch("$API_BASE_URL/movies/genres").await()
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+/**
+ * Fetch filter options for subgenres (as strings) - only returns subgenres assigned to movies.
+ */
+suspend fun fetchSubgenreOptions(): List<String> {
+    val response = window.fetch("$API_BASE_URL/movies/subgenres").await()
     val json = response.text().await()
     return Json.decodeFromString(json)
 }

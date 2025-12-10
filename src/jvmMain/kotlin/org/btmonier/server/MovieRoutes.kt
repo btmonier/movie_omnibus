@@ -116,16 +116,22 @@ fun Route.movieRoutes(dao: MovieDao) {
             val pageSize = call.request.queryParameters["pageSize"]?.toIntOrNull() ?: 25
             val search = call.request.queryParameters["search"]
             val genre = call.request.queryParameters["genre"]
+            val subgenre = call.request.queryParameters["subgenre"]
             val country = call.request.queryParameters["country"]
             val mediaType = call.request.queryParameters["mediaType"]
+            val sortField = call.request.queryParameters["sortField"]
+            val sortDirection = call.request.queryParameters["sortDirection"]
 
             val (movies, totalCount) = dao.getMoviesPaginated(
                 page = page,
                 pageSize = pageSize,
                 search = search,
                 genre = genre,
+                subgenre = subgenre,
                 country = country,
-                mediaType = mediaType
+                mediaType = mediaType,
+                sortField = sortField,
+                sortDirection = sortDirection
             )
 
             val totalPages = if (totalCount == 0) 1 else (totalCount + pageSize - 1) / pageSize

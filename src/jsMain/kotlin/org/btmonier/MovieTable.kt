@@ -13,6 +13,7 @@ class MovieTable(private val container: Element) {
     // Filter state (now supporting multiple selections)
     private var searchText = ""
     private var selectedGenres: MutableSet<String> = mutableSetOf()
+    private var selectedSubgenres: MutableSet<String> = mutableSetOf()
     private var selectedCountries: MutableSet<String> = mutableSetOf()
     private var selectedMediaTypes: MutableSet<String> = mutableSetOf()
 
@@ -35,16 +36,27 @@ class MovieTable(private val container: Element) {
 
     // Filter options (loaded from API)
     private var allGenres: List<String> = emptyList()
+    private var allSubgenres: List<String> = emptyList()
     private var allCountries: List<String> = emptyList()
     private val allMediaTypes = listOf("VHS", "DVD", "Blu-ray", "4K", "Digital")
 
     // Dropdown open states
     private var genreDropdownOpen = false
+    private var subgenreDropdownOpen = false
     private var countryDropdownOpen = false
     private var mediaTypeDropdownOpen = false
 
+    // Dropdown search text
+    private var genreSearchText = ""
+    private var subgenreSearchText = ""
+    private var countrySearchText = ""
+    private var mediaTypeSearchText = ""
+
     // Loading state
     private var isLoading = false
+    
+    // Track if we're using client-side filtering (for pagination)
+    private var usingClientSideFiltering = false
 
     private val metadataModal = MovieMetadataModal(container) {
         // onClose callback - nothing special needed
@@ -168,6 +180,7 @@ class MovieTable(private val container: Element) {
     private suspend fun loadFilterOptions() {
         try {
             allGenres = fetchGenreOptions()
+            allSubgenres = fetchSubgenreOptions()
             allCountries = fetchAllCountries()
         } catch (e: Exception) {
             console.error("Failed to load filter options:", e)
@@ -226,6 +239,7 @@ class MovieTable(private val container: Element) {
                             }
                             onChangeFunction = {
                                 currentPage = 1
+                                renderFilters()
                                 mainScope.launch { loadMovies() }
                             }
                         }
@@ -323,10 +337,16 @@ class MovieTable(private val container: Element) {
                         options = allGenres,
                         selectedOptions = selectedGenres,
                         isOpen = genreDropdownOpen,
+                        searchText = genreSearchText,
                         onToggle = {
                             genreDropdownOpen = !genreDropdownOpen
+                            if (!genreDropdownOpen) genreSearchText = ""
+                            subgenreDropdownOpen = false
+                            subgenreSearchText = ""
                             countryDropdownOpen = false
+                            countrySearchText = ""
                             mediaTypeDropdownOpen = false
+                            mediaTypeSearchText = ""
                             renderFilters()
                         },
                         onOptionToggle = { option ->
@@ -344,6 +364,61 @@ class MovieTable(private val container: Element) {
                             currentPage = 1
                             renderFilters()
                             mainScope.launch { loadMovies() }
+                        },
+                        onSearchChange = { newText ->
+                            genreSearchText = newText
+                            renderFilters()
+                            // Refocus the search input after re-render
+                            (document.getElementById("genre-search") as? HTMLInputElement)?.let { input ->
+                                input.focus()
+                                input.setSelectionRange(newText.length, newText.length)
+                            }
+                        }
+                    )
+
+                    // Subgenre multi-select dropdown
+                    renderMultiSelectDropdown(
+                        id = "subgenre",
+                        label = "\uD83D\uDD2C Subgenres",
+                        options = allSubgenres,
+                        selectedOptions = selectedSubgenres,
+                        isOpen = subgenreDropdownOpen,
+                        searchText = subgenreSearchText,
+                        onToggle = {
+                            subgenreDropdownOpen = !subgenreDropdownOpen
+                            if (!subgenreDropdownOpen) subgenreSearchText = ""
+                            genreDropdownOpen = false
+                            genreSearchText = ""
+                            countryDropdownOpen = false
+                            countrySearchText = ""
+                            mediaTypeDropdownOpen = false
+                            mediaTypeSearchText = ""
+                            renderFilters()
+                        },
+                        onOptionToggle = { option ->
+                            if (selectedSubgenres.contains(option)) {
+                                selectedSubgenres.remove(option)
+                            } else {
+                                selectedSubgenres.add(option)
+                            }
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onClear = {
+                            selectedSubgenres.clear()
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onSearchChange = { newText ->
+                            subgenreSearchText = newText
+                            renderFilters()
+                            // Refocus the search input after re-render
+                            (document.getElementById("subgenre-search") as? HTMLInputElement)?.let { input ->
+                                input.focus()
+                                input.setSelectionRange(newText.length, newText.length)
+                            }
                         }
                     )
 
@@ -354,10 +429,16 @@ class MovieTable(private val container: Element) {
                         options = allCountries,
                         selectedOptions = selectedCountries,
                         isOpen = countryDropdownOpen,
+                        searchText = countrySearchText,
                         onToggle = {
                             countryDropdownOpen = !countryDropdownOpen
+                            if (!countryDropdownOpen) countrySearchText = ""
                             genreDropdownOpen = false
+                            genreSearchText = ""
+                            subgenreDropdownOpen = false
+                            subgenreSearchText = ""
                             mediaTypeDropdownOpen = false
+                            mediaTypeSearchText = ""
                             renderFilters()
                         },
                         onOptionToggle = { option ->
@@ -375,6 +456,15 @@ class MovieTable(private val container: Element) {
                             currentPage = 1
                             renderFilters()
                             mainScope.launch { loadMovies() }
+                        },
+                        onSearchChange = { newText ->
+                            countrySearchText = newText
+                            renderFilters()
+                            // Refocus the search input after re-render
+                            (document.getElementById("country-search") as? HTMLInputElement)?.let { input ->
+                                input.focus()
+                                input.setSelectionRange(newText.length, newText.length)
+                            }
                         }
                     )
 
@@ -385,10 +475,16 @@ class MovieTable(private val container: Element) {
                         options = allMediaTypes,
                         selectedOptions = selectedMediaTypes,
                         isOpen = mediaTypeDropdownOpen,
+                        searchText = mediaTypeSearchText,
                         onToggle = {
                             mediaTypeDropdownOpen = !mediaTypeDropdownOpen
+                            if (!mediaTypeDropdownOpen) mediaTypeSearchText = ""
                             genreDropdownOpen = false
+                            genreSearchText = ""
+                            subgenreDropdownOpen = false
+                            subgenreSearchText = ""
                             countryDropdownOpen = false
+                            countrySearchText = ""
                             renderFilters()
                         },
                         onOptionToggle = { option ->
@@ -406,13 +502,22 @@ class MovieTable(private val container: Element) {
                             currentPage = 1
                             renderFilters()
                             mainScope.launch { loadMovies() }
+                        },
+                        onSearchChange = { newText ->
+                            mediaTypeSearchText = newText
+                            renderFilters()
+                            // Refocus the search input after re-render
+                            (document.getElementById("media-type-search") as? HTMLInputElement)?.let { input ->
+                                input.focus()
+                                input.setSelectionRange(newText.length, newText.length)
+                            }
                         }
                     )
                 }
 
                 // Row 3: Active filters display and reset button
                 val hasActiveFilters = searchText.isNotBlank() || selectedGenres.isNotEmpty() || 
-                    selectedCountries.isNotEmpty() || selectedMediaTypes.isNotEmpty()
+                    selectedSubgenres.isNotEmpty() || selectedCountries.isNotEmpty() || selectedMediaTypes.isNotEmpty()
 
                 if (hasActiveFilters) {
                     div {
@@ -434,6 +539,16 @@ class MovieTable(private val container: Element) {
                         selectedGenres.forEach { genre ->
                             renderFilterTag(genre, "#e8f0fe", "#1967d2") {
                                 selectedGenres.remove(genre)
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Show selected subgenre tags
+                        selectedSubgenres.forEach { subgenre ->
+                            renderFilterTag(subgenre, "#e3f2fd", "#0d47a1") {
+                                selectedSubgenres.remove(subgenre)
                                 currentPage = 1
                                 renderFilters()
                                 mainScope.launch { loadMovies() }
@@ -515,10 +630,15 @@ class MovieTable(private val container: Element) {
             val target = event.target as? Element
             if (target != null) {
                 val isInsideDropdown = target.closest(".multi-select-dropdown") != null
-                if (!isInsideDropdown && (genreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
+                if (!isInsideDropdown && (genreDropdownOpen || subgenreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
                     genreDropdownOpen = false
+                    subgenreDropdownOpen = false
                     countryDropdownOpen = false
                     mediaTypeDropdownOpen = false
+                    genreSearchText = ""
+                    subgenreSearchText = ""
+                    countrySearchText = ""
+                    mediaTypeSearchText = ""
                     renderFilters()
                 }
             }
@@ -531,10 +651,19 @@ class MovieTable(private val container: Element) {
         options: List<String>,
         selectedOptions: Set<String>,
         isOpen: Boolean,
+        searchText: String,
         onToggle: () -> Unit,
         onOptionToggle: (String) -> Unit,
-        onClear: () -> Unit
+        onClear: () -> Unit,
+        onSearchChange: (String) -> Unit
     ) {
+        // Filter options based on search text
+        val filteredOptions = if (searchText.isBlank()) {
+            options
+        } else {
+            options.filter { it.lowercase().contains(searchText.lowercase()) }
+        }
+
         div {
             style = "position: relative;"
             attributes["class"] = "multi-select-dropdown"
@@ -597,89 +726,127 @@ class MovieTable(private val container: Element) {
                         border-radius: 8px;
                         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                         z-index: 100;
-                        max-height: 280px;
-                        overflow-y: auto;
+                        max-height: 320px;
+                        display: flex;
+                        flex-direction: column;
                     """.trimIndent()
                     onClickFunction = { event ->
                         event.stopPropagation()
                     }
 
-                    // Clear selection option
-                    if (selectedOptions.isNotEmpty()) {
-                        div {
+                    // Search input
+                    div {
+                        style = "padding: 8px; border-bottom: 1px solid #e8eaed; flex-shrink: 0;"
+                        input(type = InputType.text) {
+                            this.id = "$id-search"
                             style = """
-                                padding: 10px 14px;
+                                width: 100%;
+                                padding: 8px 10px;
                                 font-size: 13px;
-                                color: #d93025;
-                                cursor: pointer;
-                                border-bottom: 1px solid #e8eaed;
-                                font-weight: 500;
-                                transition: background-color 0.15s;
+                                border: 1px solid #dadce0;
+                                border-radius: 6px;
+                                outline: none;
+                                box-sizing: border-box;
                             """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
-                            +"✕ Clear selection"
+                            placeholder = "Search..."
+                            value = searchText
+                            attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
+                            attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                            onInputFunction = { event ->
+                                val newValue = (event.target as HTMLInputElement).value
+                                onSearchChange(newValue)
+                            }
                             onClickFunction = { event ->
                                 event.stopPropagation()
-                                onClear()
                             }
                         }
                     }
 
-                    // Options list
-                    options.forEach { option ->
-                        val isSelected = selectedOptions.contains(option)
-                        div {
-                            style = """
-                                padding: 10px 14px;
-                                font-size: 14px;
-                                cursor: pointer;
-                                display: flex;
-                                align-items: center;
-                                gap: 10px;
-                                transition: background-color 0.15s;
-                                ${if (isSelected) "background-color: #e8f0fe;" else ""}
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='${if (isSelected) "#d2e3fc" else "#f8f9fa"}'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='${if (isSelected) "#e8f0fe" else "white"}'"
-                            onClickFunction = { event ->
-                                event.stopPropagation()
-                                onOptionToggle(option)
-                            }
+                    // Scrollable options container
+                    div {
+                        style = "overflow-y: auto; flex: 1; max-height: 240px;"
 
-                            // Checkbox
+                        // Clear selection option
+                        if (selectedOptions.isNotEmpty()) {
                             div {
                                 style = """
-                                    width: 18px;
-                                    height: 18px;
-                                    border: 2px solid ${if (isSelected) "#1a73e8" else "#5f6368"};
-                                    border-radius: 4px;
-                                    background-color: ${if (isSelected) "#1a73e8" else "white"};
-                                    display: flex;
-                                    align-items: center;
-                                    justify-content: center;
-                                    flex-shrink: 0;
+                                    padding: 10px 14px;
+                                    font-size: 13px;
+                                    color: #d93025;
+                                    cursor: pointer;
+                                    border-bottom: 1px solid #e8eaed;
+                                    font-weight: 500;
+                                    transition: background-color 0.15s;
                                 """.trimIndent()
-
-                                if (isSelected) {
-                                    span {
-                                        style = "color: white; font-size: 12px; font-weight: bold;"
-                                        +"✓"
-                                    }
+                                attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                                attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                                +"✕ Clear selection"
+                                onClickFunction = { event ->
+                                    event.stopPropagation()
+                                    onClear()
                                 }
                             }
+                        }
 
-                            span {
-                                style = "color: #202124;"
-                                +option
+                        // Options list
+                        filteredOptions.forEach { option ->
+                            val isSelected = selectedOptions.contains(option)
+                            div {
+                                style = """
+                                    padding: 10px 14px;
+                                    font-size: 14px;
+                                    cursor: pointer;
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 10px;
+                                    transition: background-color 0.15s;
+                                    ${if (isSelected) "background-color: #e8f0fe;" else ""}
+                                """.trimIndent()
+                                attributes["onmouseover"] = "this.style.backgroundColor='${if (isSelected) "#d2e3fc" else "#f8f9fa"}'"
+                                attributes["onmouseout"] = "this.style.backgroundColor='${if (isSelected) "#e8f0fe" else "white"}'"
+                                onClickFunction = { event ->
+                                    event.stopPropagation()
+                                    onOptionToggle(option)
+                                }
+
+                                // Checkbox
+                                div {
+                                    style = """
+                                        width: 18px;
+                                        height: 18px;
+                                        border: 2px solid ${if (isSelected) "#1a73e8" else "#5f6368"};
+                                        border-radius: 4px;
+                                        background-color: ${if (isSelected) "#1a73e8" else "white"};
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        flex-shrink: 0;
+                                    """.trimIndent()
+
+                                    if (isSelected) {
+                                        span {
+                                            style = "color: white; font-size: 12px; font-weight: bold;"
+                                            +"✓"
+                                        }
+                                    }
+                                }
+
+                                span {
+                                    style = "color: #202124;"
+                                    +option
+                                }
                             }
                         }
-                    }
 
-                    if (options.isEmpty()) {
-                        div {
-                            style = "padding: 16px; text-align: center; color: #5f6368; font-size: 13px;"
-                            +"No options available"
+                        if (filteredOptions.isEmpty()) {
+                            div {
+                                style = "padding: 16px; text-align: center; color: #5f6368; font-size: 13px;"
+                                if (searchText.isNotBlank()) {
+                                    +"No matches found"
+                                } else {
+                                    +"No options available"
+                                }
+                            }
                         }
                     }
                 }
@@ -719,8 +886,8 @@ class MovieTable(private val container: Element) {
         }
     }
 
-    private fun applyFiltersAndSort() {
-        // Apply client-side filtering
+    private fun applyFilters() {
+        // Apply client-side filtering only (sorting is done server-side)
         var filtered = currentMovies.toList()
 
         // Filter by search text
@@ -736,6 +903,13 @@ class MovieTable(private val container: Element) {
         if (selectedGenres.isNotEmpty()) {
             filtered = filtered.filter { movie ->
                 selectedGenres.all { genre -> movie.genres.contains(genre) }
+            }
+        }
+
+        // Filter by subgenres (movie must have ALL selected subgenres)
+        if (selectedSubgenres.isNotEmpty()) {
+            filtered = filtered.filter { movie ->
+                selectedSubgenres.all { subgenre -> movie.subgenres.contains(subgenre) }
             }
         }
 
@@ -764,48 +938,30 @@ class MovieTable(private val container: Element) {
             }
         }
 
-        // Apply sorting
-        filtered = when (sortField) {
-            SortField.TITLE -> {
-                if (sortDirection == SortDirection.ASC) {
-                    filtered.sortedBy { it.title.lowercase() }
-                } else {
-                    filtered.sortedByDescending { it.title.lowercase() }
-                }
-            }
-            SortField.RELEASE_DATE -> {
-                if (sortDirection == SortDirection.ASC) {
-                    filtered.sortedBy { it.release_date ?: Int.MAX_VALUE }
-                } else {
-                    filtered.sortedByDescending { it.release_date ?: Int.MIN_VALUE }
-                }
-            }
-            SortField.DATE_ADDED -> {
-                if (sortDirection == SortDirection.ASC) {
-                    filtered.sortedBy { it.createdAt ?: "" }
-                } else {
-                    filtered.sortedByDescending { it.createdAt ?: "" }
-                }
-            }
-        }
-
+        // Sorting is already done server-side, no need to sort here
         displayedMovies = filtered
-        renderCards()
+        renderCards(useClientSidePagination = true)
     }
 
     private fun resetAllFilters() {
         searchText = ""
         selectedGenres.clear()
+        selectedSubgenres.clear()
         selectedCountries.clear()
         selectedMediaTypes.clear()
         sortField = SortField.TITLE
         sortDirection = SortDirection.ASC
         currentPage = 1
 
-        // Close all dropdowns
+        // Close all dropdowns and clear search text
         genreDropdownOpen = false
+        subgenreDropdownOpen = false
         countryDropdownOpen = false
         mediaTypeDropdownOpen = false
+        genreSearchText = ""
+        subgenreSearchText = ""
+        countrySearchText = ""
+        mediaTypeSearchText = ""
 
         // Update UI
         (document.getElementById("search-input") as? HTMLInputElement)?.value = ""
@@ -821,35 +977,51 @@ class MovieTable(private val container: Element) {
         showLoadingState()
 
         try {
-            // Check if we need client-side filtering (multi-select active)
+            // Convert sort field enum to API string
+            val sortFieldStr = when (sortField) {
+                SortField.TITLE -> "title"
+                SortField.RELEASE_DATE -> "release_date"
+                SortField.DATE_ADDED -> "date_added"
+            }
+            val sortDirectionStr = if (sortDirection == SortDirection.ASC) "asc" else "desc"
+
+            // Check if we need client-side filtering (only when multiple items selected for any filter)
             val needsClientSideFiltering = selectedGenres.size > 1 || 
+                selectedSubgenres.size > 1 ||
                 selectedCountries.size > 1 || 
-                selectedMediaTypes.size > 1 ||
-                sortField != SortField.TITLE ||
-                sortDirection != SortDirection.ASC
+                selectedMediaTypes.size > 1
 
             if (needsClientSideFiltering) {
                 // Load all movies for client-side filtering when multi-select is active
+                // Server still handles sorting for us
+                usingClientSideFiltering = true
                 val response = fetchMoviesPaginated(
                     page = 1,
                     pageSize = 10000,
                     search = null,
                     genre = null,
+                    subgenre = null,
                     country = null,
-                    mediaType = null
+                    mediaType = null,
+                    sortField = sortFieldStr,
+                    sortDirection = sortDirectionStr
                 )
                 currentMovies = response.movies
                 totalCount = response.totalCount
-                applyFiltersAndSort()
+                applyFilters()
             } else {
-                // Use fast server-side pagination for simple cases
+                // Use fast server-side pagination and sorting
+                usingClientSideFiltering = false
                 val response = fetchMoviesPaginated(
                     page = currentPage,
                     pageSize = itemsPerPage,
                     search = searchText.takeIf { it.isNotBlank() },
                     genre = selectedGenres.firstOrNull(),
+                    subgenre = selectedSubgenres.firstOrNull(),
                     country = selectedCountries.firstOrNull(),
-                    mediaType = selectedMediaTypes.firstOrNull()
+                    mediaType = selectedMediaTypes.firstOrNull(),
+                    sortField = sortFieldStr,
+                    sortDirection = sortDirectionStr
                 )
                 currentMovies = response.movies
                 displayedMovies = response.movies
@@ -892,20 +1064,35 @@ class MovieTable(private val container: Element) {
         }
     }
 
-    private fun renderCards() {
-        // Calculate pagination for displayed (filtered) movies
-        val filteredCount = displayedMovies.size
-        totalPages = if (filteredCount == 0) 1 else (filteredCount + itemsPerPage - 1) / itemsPerPage
-        if (currentPage > totalPages) currentPage = totalPages
+    private fun renderCards(useClientSidePagination: Boolean = false) {
+        // Determine pagination and count based on mode
+        val paginatedMovies: List<MovieMetadata>
+        val displayCount: Int
+        val startIdx: Int
+        val endIdx: Int
 
-        val startIndex = (currentPage - 1) * itemsPerPage
-        val endIndex = kotlin.math.min(startIndex + itemsPerPage, filteredCount)
-        val paginatedMovies = if (filteredCount > 0) displayedMovies.subList(startIndex, endIndex) else emptyList()
+        if (useClientSidePagination) {
+            // Client-side filtering: paginate displayedMovies locally
+            val filteredCount = displayedMovies.size
+            totalPages = if (filteredCount == 0) 1 else (filteredCount + itemsPerPage - 1) / itemsPerPage
+            if (currentPage > totalPages) currentPage = totalPages
+
+            startIdx = (currentPage - 1) * itemsPerPage
+            endIdx = kotlin.math.min(startIdx + itemsPerPage, filteredCount)
+            paginatedMovies = if (filteredCount > 0) displayedMovies.subList(startIdx, endIdx) else emptyList()
+            displayCount = filteredCount
+        } else {
+            // Server-side pagination: displayedMovies is already the current page
+            paginatedMovies = displayedMovies
+            displayCount = totalCount
+            startIdx = (currentPage - 1) * itemsPerPage
+            endIdx = startIdx + paginatedMovies.size
+        }
 
         // Update count display
         val countDiv = document.getElementById("results-count")
-        if (filteredCount > 0) {
-            countDiv?.textContent = "Showing ${startIndex + 1}-$endIndex of $filteredCount movies"
+        if (displayCount > 0) {
+            countDiv?.textContent = "Showing ${startIdx + 1}-$endIdx of $displayCount movies"
         } else {
             countDiv?.textContent = "No movies found"
         }
@@ -958,7 +1145,7 @@ class MovieTable(private val container: Element) {
 
                                 // Title
                                 h3 {
-                                    style = "margin: 0 0 8px 0; font-size: 18px; font-weight: 500; line-height: 1.3; font-family: 'Google Sans', 'Roboto', sans-serif;"
+                                    style = "margin: 0 0 8px 0; font-size: 18px; font-weight: 500; line-height: 1.3; font-family: 'Google Sans', 'Roboto', sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
                                     +movie.title
                                 }
 
@@ -1047,37 +1234,13 @@ class MovieTable(private val container: Element) {
                                     }
                                 }
 
-                                // Physical media badges
+                                // Physical media count badge
                                 if (movie.physicalMedia.isNotEmpty()) {
                                     div {
-                                        style = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid #e8eaed;"
-                                        movie.physicalMedia.forEach { media ->
-                                            if (media.entryLetter != null) {
-                                                span {
-                                                    style = "display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; background-color: #202124; color: white; border-radius: 4px; font-size: 10px; font-weight: 600;"
-                                                    +media.entryLetter
-                                                }
-                                            }
-                                            media.mediaTypes.forEach { type ->
-                                                val mediaLabel = when (type) {
-                                                    MediaType.VHS -> "VHS"
-                                                    MediaType.DVD -> "DVD"
-                                                    MediaType.BLURAY -> "Blu-ray"
-                                                    MediaType.FOURK -> "4K"
-                                                    MediaType.DIGITAL -> "Digital"
-                                                }
-                                                val badgeStyle = when (type) {
-                                                    MediaType.VHS -> "background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%); color: #1e8e3e;"
-                                                    MediaType.DVD -> "background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0;"
-                                                    MediaType.BLURAY -> "background: linear-gradient(135deg, #f3e5f5 0%, #e1bee7 100%); color: #6a1b9a;"
-                                                    MediaType.FOURK -> "background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%); color: #e65100;"
-                                                    MediaType.DIGITAL -> "background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%); color: #c2185b;"
-                                                }
-                                                span {
-                                                    style = "display: inline-block; padding: 4px 10px; $badgeStyle border-radius: 12px; font-size: 11px; font-weight: 600;"
-                                                    +mediaLabel
-                                                }
-                                            }
+                                        style = "display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid #e8eaed;"
+                                        span {
+                                            style = "display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; border-radius: 12px; font-size: 11px; font-weight: 600;"
+                                            +"💿 ${movie.physicalMedia.size} ${if (movie.physicalMedia.size == 1) "entry" else "entries"}"
                                         }
                                     }
                                 }
@@ -1132,7 +1295,7 @@ class MovieTable(private val container: Element) {
             }
 
             // Pagination controls
-            if (totalPages > 1 || filteredCount > 0) {
+            if (totalPages > 1 || paginatedMovies.isNotEmpty()) {
                 div {
                     style = """
                         margin-top: 32px;
@@ -1165,7 +1328,7 @@ class MovieTable(private val container: Element) {
                         onClickFunction = {
                             if (currentPage > 1) {
                                 currentPage--
-                                renderCards()
+                                renderCards(useClientSidePagination = usingClientSideFiltering)
                             }
                         }
                     }
@@ -1198,7 +1361,7 @@ class MovieTable(private val container: Element) {
                         onClickFunction = {
                             if (currentPage < totalPages) {
                                 currentPage++
-                                renderCards()
+                                renderCards(useClientSidePagination = usingClientSideFiltering)
                             }
                         }
                     }
@@ -1233,7 +1396,7 @@ class MovieTable(private val container: Element) {
                                 select?.value?.toIntOrNull()?.let { newSize ->
                                     itemsPerPage = newSize
                                     currentPage = 1
-                                    renderCards()
+                                    renderCards(useClientSidePagination = usingClientSideFiltering)
                                 }
                             }
                         }
