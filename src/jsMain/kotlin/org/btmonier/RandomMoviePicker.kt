@@ -15,15 +15,22 @@ class RandomMoviePicker(
     private val container: Element,
     private val onBack: () -> Unit
 ) {
-    private var selectedGenre: String? = null
-    private var selectedSubgenre: String? = null
-    private var selectedCountry: String? = null
-    private var selectedMediaType: String? = null
+    // Multi-select filter state
+    private var selectedGenres: MutableSet<String> = mutableSetOf()
+    private var selectedSubgenres: MutableSet<String> = mutableSetOf()
+    private var selectedCountries: MutableSet<String> = mutableSetOf()
+    private var selectedMediaTypes: MutableSet<String> = mutableSetOf()
     
     private var genres: List<String> = emptyList()
     private var subgenres: List<String> = emptyList()
     private var countries: List<String> = emptyList()
     private var mediaTypes: List<String> = emptyList()
+    
+    // Dropdown open states
+    private var genreDropdownOpen = false
+    private var subgenreDropdownOpen = false
+    private var countryDropdownOpen = false
+    private var mediaTypeDropdownOpen = false
     
     private var pickedMovie: MovieMetadata? = null
     private var availableCount: Int = 0
@@ -51,33 +58,101 @@ class RandomMoviePicker(
     private fun render() {
         container.innerHTML = ""
         container.append {
+            // Navbar
+            nav {
+                style = """
+                    position: sticky;
+                    top: 0;
+                    z-index: 1000;
+                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+                    padding: 0 24px;
+                """.trimIndent()
+                
+                div {
+                    style = """
+                        max-width: 1400px;
+                        margin: 0 auto;
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        height: 64px;
+                    """.trimIndent()
+                    
+                    // Logo/Title (clickable to go back)
+                    div {
+                        style = """
+                            display: flex;
+                            align-items: center;
+                            gap: 12px;
+                            cursor: pointer;
+                        """.trimIndent()
+                        onClickFunction = {
+                            onBack()
+                        }
+                        
+                        span {
+                            classes = setOf("mdi", "mdi-movie-open")
+                            style = "font-size: 28px; color: #ffffff;"
+                        }
+                        h1 {
+                            style = """
+                                font-family: 'Oswald', sans-serif;
+                                font-weight: 500;
+                                font-size: 24px;
+                                color: #ffffff;
+                                margin: 0;
+                                letter-spacing: 1px;
+                            """.trimIndent()
+                            +"The Movie Omnibus"
+                        }
+                    }
+                    
+                    // Nav links
+                    div {
+                        style = "display: flex; align-items: center; gap: 8px;"
+                        
+                        // Random button (active state)
+                        a {
+                            style = """
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                padding: 10px 16px;
+                                font-size: 14px;
+                                font-weight: 500;
+                                cursor: pointer;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                text-decoration: none;
+                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+                            """.trimIndent()
+                            span {
+                                classes = setOf("mdi", "mdi-dice-multiple")
+                                style = "font-size: 18px;"
+                            }
+                            span { +"Random" }
+                        }
+                    }
+                }
+            }
+
+            // Main content
             div {
                 style = "max-width: 900px; margin: 0 auto; padding: 40px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
 
-                // Header with back button
+                // Page title
                 div {
-                    style = "display: flex; align-items: center; margin-bottom: 40px;"
-                    button {
-                        style = """
-                            padding: 8px 16px;
-                            font-size: 14px;
-                            cursor: pointer;
-                            background-color: #f1f3f4;
-                            color: #202124;
-                            border: none;
-                            border-radius: 4px;
-                            font-weight: 500;
-                            margin-right: 20px;
-                            transition: background-color 0.2s;
-                        """.trimIndent()
-                        attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
-                        attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
-                        +"← Back to Collection"
-                        onClickFunction = { onBack() }
-                    }
+                    style = "margin-bottom: 40px;"
                     h1 {
-                        style = "color: #202124; font-weight: 400; font-size: 28px; margin: 0;"
-                        +"🎲 Random Movie Picker"
+                        style = "font-family: 'Oswald', sans-serif; font-weight: 500; color: #202124; font-size: 28px; margin: 0; display: flex; align-items: center; gap: 12px; letter-spacing: 1px;"
+                        span {
+                            classes = setOf("mdi", "mdi-dice-multiple")
+                            style = "font-size: 32px; color: #667eea;"
+                        }
+                        +"Random Movie Picker"
                     }
                 }
 
@@ -103,19 +178,152 @@ class RandomMoviePicker(
                     }
 
                     div {
+                        id = "filters-grid-container"
                         style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;"
 
                         // Genre filter
-                        renderFilterSelect("Genre", "filter-genre", genres, selectedGenre)
+                        renderMultiSelectDropdown(
+                            label = "Genre",
+                            iconClass = "mdi-drama-masks",
+                            options = genres,
+                            selectedOptions = selectedGenres,
+                            isOpen = genreDropdownOpen,
+                            onToggle = {
+                                genreDropdownOpen = !genreDropdownOpen
+                                subgenreDropdownOpen = false
+                                countryDropdownOpen = false
+                                mediaTypeDropdownOpen = false
+                                renderFiltersSection()
+                            },
+                            onOptionToggle = { value ->
+                                if (value in selectedGenres) {
+                                    selectedGenres.remove(value)
+                                } else {
+                                    selectedGenres.add(value)
+                                }
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            },
+                            onClear = {
+                                selectedGenres.clear()
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            }
+                        )
                         
                         // Subgenre filter
-                        renderFilterSelect("Subgenre", "filter-subgenre", subgenres, selectedSubgenre)
+                        renderMultiSelectDropdown(
+                            label = "Subgenre",
+                            iconClass = "mdi-tag-outline",
+                            options = subgenres,
+                            selectedOptions = selectedSubgenres,
+                            isOpen = subgenreDropdownOpen,
+                            onToggle = {
+                                subgenreDropdownOpen = !subgenreDropdownOpen
+                                genreDropdownOpen = false
+                                countryDropdownOpen = false
+                                mediaTypeDropdownOpen = false
+                                renderFiltersSection()
+                            },
+                            onOptionToggle = { value ->
+                                if (value in selectedSubgenres) {
+                                    selectedSubgenres.remove(value)
+                                } else {
+                                    selectedSubgenres.add(value)
+                                }
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            },
+                            onClear = {
+                                selectedSubgenres.clear()
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            }
+                        )
                         
                         // Country filter
-                        renderFilterSelect("Country", "filter-country", countries, selectedCountry)
+                        renderMultiSelectDropdown(
+                            label = "Country",
+                            iconClass = "mdi-earth",
+                            options = countries,
+                            selectedOptions = selectedCountries,
+                            isOpen = countryDropdownOpen,
+                            onToggle = {
+                                countryDropdownOpen = !countryDropdownOpen
+                                genreDropdownOpen = false
+                                subgenreDropdownOpen = false
+                                mediaTypeDropdownOpen = false
+                                renderFiltersSection()
+                            },
+                            onOptionToggle = { value ->
+                                if (value in selectedCountries) {
+                                    selectedCountries.remove(value)
+                                } else {
+                                    selectedCountries.add(value)
+                                }
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            },
+                            onClear = {
+                                selectedCountries.clear()
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            }
+                        )
                         
                         // Media Type filter
-                        renderFilterSelect("Media Type", "filter-media-type", mediaTypes, selectedMediaType)
+                        renderMultiSelectDropdown(
+                            label = "Media Type",
+                            iconClass = "mdi-disc",
+                            options = mediaTypes,
+                            selectedOptions = selectedMediaTypes,
+                            isOpen = mediaTypeDropdownOpen,
+                            onToggle = {
+                                mediaTypeDropdownOpen = !mediaTypeDropdownOpen
+                                genreDropdownOpen = false
+                                subgenreDropdownOpen = false
+                                countryDropdownOpen = false
+                                renderFiltersSection()
+                            },
+                            onOptionToggle = { value ->
+                                if (value in selectedMediaTypes) {
+                                    selectedMediaTypes.remove(value)
+                                } else {
+                                    selectedMediaTypes.add(value)
+                                }
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            },
+                            onClear = {
+                                selectedMediaTypes.clear()
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            }
+                        )
                     }
 
                     // Available count and clear button
@@ -165,7 +373,11 @@ class RandomMoviePicker(
                         """.trimIndent()
                         attributes["onmouseover"] = "this.style.transform='scale(1.02)'; this.style.boxShadow='0 6px 20px rgba(102, 126, 234, 0.5)'"
                         attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='0 4px 14px rgba(102, 126, 234, 0.4)'"
-                        +"🎬 Pick a Random Movie"
+                        span {
+                            classes = setOf("mdi", "mdi-movie-open")
+                            style = "font-size: 20px; margin-right: 8px;"
+                        }
+                        +"Pick a Random Movie"
                         onClickFunction = {
                             pickRandomMovie()
                         }
@@ -187,36 +399,172 @@ class RandomMoviePicker(
         setupFilterHandlers()
     }
 
-    private fun DIV.renderFilterSelect(labelText: String, id: String, options: List<String>, selectedValue: String?) {
+    private fun DIV.renderMultiSelectDropdown(
+        label: String,
+        iconClass: String,
+        options: List<String>,
+        selectedOptions: Set<String>,
+        isOpen: Boolean,
+        onToggle: () -> Unit,
+        onOptionToggle: (String) -> Unit,
+        onClear: () -> Unit
+    ) {
         div {
+            style = "position: relative;"
+            attributes["class"] = "filter-dropdown"
+
             label {
-                attributes["for"] = id
-                style = "display: block; margin-bottom: 6px; font-size: 13px; color: #5f6368; font-weight: 500;"
-                +labelText
+                style = "display: flex; align-items: center; gap: 4px; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                span {
+                    classes = setOf("mdi", iconClass)
+                    style = "font-size: 16px;"
+                }
+                +label
             }
-            select {
-                this.id = id
+
+            // Dropdown trigger button
+            div {
                 style = """
-                    width: 100%;
-                    padding: 10px 12px;
+                    padding: 10px 14px;
                     font-size: 14px;
-                    border: 1px solid #dadce0;
-                    border-radius: 6px;
+                    border: 1px solid ${if (isOpen) "#1a73e8" else "#dadce0"};
+                    border-radius: 8px;
                     background-color: white;
                     cursor: pointer;
-                    font-family: 'Roboto', arial, sans-serif;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    transition: border-color 0.2s;
+                    ${if (isOpen) "box-shadow: 0 0 0 3px rgba(26,115,232,0.1);" else ""}
                 """.trimIndent()
-                
-                option {
-                    value = ""
-                    selected = selectedValue == null
-                    +"Any $labelText"
+                attributes["onmouseover"] = if (!isOpen) "this.style.borderColor='#bdc1c6'" else ""
+                attributes["onmouseout"] = if (!isOpen) "this.style.borderColor='#dadce0'" else ""
+                onClickFunction = { event ->
+                    event.stopPropagation()
+                    onToggle()
                 }
-                options.forEach { opt ->
-                    option {
-                        value = opt
-                        selected = opt == selectedValue
-                        +opt
+
+                span {
+                    style = "color: ${if (selectedOptions.isEmpty()) "#5f6368" else "#202124"}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    if (selectedOptions.isEmpty()) {
+                        +"All"
+                    } else if (selectedOptions.size <= 2) {
+                        +selectedOptions.joinToString(", ")
+                    } else {
+                        +"${selectedOptions.size} selected"
+                    }
+                }
+
+                span {
+                    classes = setOf("mdi", if (isOpen) "mdi-chevron-up" else "mdi-chevron-down")
+                    style = "color: #5f6368; font-size: 16px; margin-left: 8px; flex-shrink: 0;"
+                }
+            }
+
+            // Dropdown menu
+            if (isOpen) {
+                div {
+                    style = """
+                        position: absolute;
+                        top: 100%;
+                        left: 0;
+                        right: 0;
+                        margin-top: 4px;
+                        background-color: white;
+                        border: 1px solid #dadce0;
+                        border-radius: 8px;
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                        z-index: 100;
+                        max-height: 280px;
+                        overflow-y: auto;
+                    """.trimIndent()
+
+                    // Clear selection button (if any selected)
+                    if (selectedOptions.isNotEmpty()) {
+                        div {
+                            style = """
+                                padding: 10px 14px;
+                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                background-color: white;
+                                color: #d93025;
+                                font-size: 13px;
+                                font-weight: 500;
+                                border-bottom: 1px solid #e8eaed;
+                                transition: background-color 0.15s;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                            onClickFunction = { event ->
+                                event.stopPropagation()
+                                onClear()
+                            }
+
+                            span {
+                                classes = setOf("mdi", "mdi-close")
+                                style = "font-size: 14px;"
+                            }
+                            span { +"Clear selection" }
+                        }
+                    }
+
+                    // Options with checkboxes
+                    options.forEach { opt ->
+                        div {
+                            val isSelected = opt in selectedOptions
+                            style = """
+                                padding: 10px 14px;
+                                cursor: pointer;
+                                display: flex;
+                                align-items: center;
+                                gap: 10px;
+                                background-color: white;
+                                color: #202124;
+                                font-size: 14px;
+                                transition: background-color 0.15s;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
+                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                            onClickFunction = { event ->
+                                event.stopPropagation()
+                                onOptionToggle(opt)
+                            }
+
+                            // Checkbox
+                            div {
+                                style = """
+                                    width: 18px;
+                                    height: 18px;
+                                    border: 2px solid ${if (isSelected) "#1a73e8" else "#5f6368"};
+                                    border-radius: 3px;
+                                    background-color: ${if (isSelected) "#1a73e8" else "white"};
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                    flex-shrink: 0;
+                                    transition: all 0.15s;
+                                """.trimIndent()
+
+                                if (isSelected) {
+                                    span {
+                                        classes = setOf("mdi", "mdi-check")
+                                        style = "color: white; font-size: 14px;"
+                                    }
+                                }
+                            }
+
+                            span { +opt }
+                        }
+                    }
+
+                    // Empty state
+                    if (options.isEmpty()) {
+                        div {
+                            style = "padding: 16px; text-align: center; color: #5f6368; font-size: 13px;"
+                            +"No options available"
+                        }
                     }
                 }
             }
@@ -253,11 +601,16 @@ class RandomMoviePicker(
                     border-radius: 16px;
                     text-align: center;
                     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+                    margin: 0 12px;
                 """.trimIndent()
 
                 h2 {
-                    style = "margin: 0 0 8px 0; color: #202124; font-size: 28px; font-weight: 500;"
-                    +"🎉 Tonight's Pick"
+                    style = "margin: 0 0 8px 0; color: #202124; font-size: 28px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 10px;"
+                    span {
+                        classes = setOf("mdi", "mdi-party-popper")
+                        style = "font-size: 32px; color: #f9a825;"
+                    }
+                    +"Tonight's Pick"
                 }
                 
                 div {
@@ -334,7 +687,10 @@ class RandomMoviePicker(
 
                         h4 {
                             style = "margin: 0 0 16px 0; color: #202124; font-size: 16px; font-weight: 500; display: flex; align-items: center; gap: 8px;"
-                            span { +"📀" }
+                            span {
+                                classes = setOf("mdi", "mdi-disc")
+                                style = "font-size: 20px; color: #1a73e8;"
+                            }
                             +"Physical Media"
                         }
 
@@ -405,7 +761,10 @@ class RandomMoviePicker(
                                     media.location?.let { location ->
                                         div {
                                             style = "display: flex; align-items: center; gap: 6px;"
-                                            span { +"📍" }
+                                            span {
+                                                classes = setOf("mdi", "mdi-map-marker")
+                                                style = "font-size: 16px;"
+                                            }
                                             span {
                                                 style = "font-weight: 500;"
                                                 +location
@@ -416,7 +775,10 @@ class RandomMoviePicker(
                                     media.distributor?.let { distributor ->
                                         div {
                                             style = "display: flex; align-items: center; gap: 6px;"
-                                            span { +"🏭" }
+                                            span {
+                                                classes = setOf("mdi", "mdi-domain")
+                                                style = "font-size: 16px;"
+                                            }
                                             span { +distributor }
                                         }
                                     }
@@ -424,7 +786,10 @@ class RandomMoviePicker(
                                     media.releaseDate?.let { date ->
                                         div {
                                             style = "display: flex; align-items: center; gap: 6px;"
-                                            span { +"📅" }
+                                            span {
+                                                classes = setOf("mdi", "mdi-calendar")
+                                                style = "font-size: 16px;"
+                                            }
                                             span { +date }
                                         }
                                     }
@@ -436,8 +801,12 @@ class RandomMoviePicker(
                                         style = "margin-top: 16px;"
                                         
                                         div {
-                                            style = "font-size: 13px; color: #5f6368; margin-bottom: 8px; font-weight: 500;"
-                                            +"📸 Images (${media.images.size})"
+                                            style = "font-size: 13px; color: #5f6368; margin-bottom: 8px; font-weight: 500; display: flex; align-items: center; gap: 6px;"
+                                            span {
+                                                classes = setOf("mdi", "mdi-camera")
+                                                style = "font-size: 16px;"
+                                            }
+                                            +"Images (${media.images.size})"
                                         }
 
                                         div {
@@ -495,11 +864,19 @@ class RandomMoviePicker(
                     }
                 }
 
-                // Action buttons
+                // Action buttons - responsive layout
                 div {
-                    style = "display: flex; gap: 12px; justify-content: center; margin-top: 20px;"
+                    id = "action-buttons-container"
+                    style = """
+                        display: flex;
+                        flex-wrap: wrap;
+                        gap: 12px;
+                        justify-content: center;
+                        margin-top: 20px;
+                    """.trimIndent()
 
                     button {
+                        classes = setOf("action-btn")
                         style = """
                             padding: 12px 24px;
                             font-size: 14px;
@@ -510,6 +887,9 @@ class RandomMoviePicker(
                             border-radius: 6px;
                             font-weight: 500;
                             transition: background-color 0.2s;
+                            flex: 1 1 auto;
+                            min-width: 150px;
+                            max-width: 200px;
                         """.trimIndent()
                         attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'"
                         attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'"
@@ -523,6 +903,7 @@ class RandomMoviePicker(
                     if (movie.id != null) {
                         val movieId = movie.id
                         button {
+                            classes = setOf("action-btn")
                             style = """
                                 padding: 12px 24px;
                                 font-size: 14px;
@@ -533,6 +914,9 @@ class RandomMoviePicker(
                                 border-radius: 6px;
                                 font-weight: 500;
                                 transition: background-color 0.2s;
+                                flex: 1 1 auto;
+                                min-width: 150px;
+                                max-width: 200px;
                             """.trimIndent()
                             attributes["onmouseover"] = "this.style.backgroundColor='#2d8e47'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#34a853'"
@@ -544,6 +928,7 @@ class RandomMoviePicker(
                     }
 
                     button {
+                        classes = setOf("action-btn")
                         style = """
                             padding: 12px 24px;
                             font-size: 14px;
@@ -554,10 +939,17 @@ class RandomMoviePicker(
                             border-radius: 6px;
                             font-weight: 500;
                             transition: background-color 0.2s;
+                            flex: 1 1 auto;
+                            min-width: 150px;
+                            max-width: 200px;
                         """.trimIndent()
                         attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
                         attributes["onmouseout"] = "this.style.backgroundColor='#f1f3f4'"
-                        +"🎲 Pick Again"
+                        span {
+                            classes = setOf("mdi", "mdi-dice-multiple")
+                            style = "font-size: 16px; margin-right: 6px;"
+                        }
+                        +"Pick Again"
                         onClickFunction = {
                             pickRandomMovie()
                         }
@@ -568,6 +960,7 @@ class RandomMoviePicker(
                         a {
                             href = movie.url
                             target = "_blank"
+                            classes = setOf("action-btn")
                             style = """
                                 padding: 12px 24px;
                                 font-size: 14px;
@@ -578,8 +971,13 @@ class RandomMoviePicker(
                                 border-radius: 6px;
                                 font-weight: 500;
                                 text-decoration: none;
-                                display: inline-block;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
                                 transition: background-color 0.2s;
+                                flex: 1 1 auto;
+                                min-width: 150px;
+                                max-width: 200px;
                             """.trimIndent()
                             attributes["onmouseover"] = "this.style.backgroundColor='#2aa8e0'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#40bcf4'"
@@ -592,29 +990,181 @@ class RandomMoviePicker(
     }
 
     private fun setupFilterHandlers() {
-        listOf(
-            "filter-genre" to { value: String -> selectedGenre = value.ifBlank { null } },
-            "filter-subgenre" to { value: String -> selectedSubgenre = value.ifBlank { null } },
-            "filter-country" to { value: String -> selectedCountry = value.ifBlank { null } },
-            "filter-media-type" to { value: String -> selectedMediaType = value.ifBlank { null } }
-        ).forEach { (id, setter) ->
-            val select = document.getElementById(id) as? HTMLSelectElement
-            select?.addEventListener("change", {
-                setter(select.value)
-                mainScope.launch {
-                    updateCount()
-                    updateCountDisplay()
-                }
-            })
+        // Filter handlers are now managed via dropdown callbacks
+        // Add click-outside listener to close dropdowns
+        document.addEventListener("click", { event ->
+            val target = event.target as? Element
+            val clickedDropdown = target?.closest(".filter-dropdown")
+            if (clickedDropdown == null && (genreDropdownOpen || subgenreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
+                genreDropdownOpen = false
+                subgenreDropdownOpen = false
+                countryDropdownOpen = false
+                mediaTypeDropdownOpen = false
+                renderFiltersSection()
+            }
+        })
+    }
+
+    private fun renderFiltersSection() {
+        val filtersContainer = document.getElementById("filters-grid-container")
+        filtersContainer?.innerHTML = ""
+        filtersContainer?.append {
+            div {
+                style = "display: contents;"
+                
+                // Genre filter
+                renderMultiSelectDropdown(
+                    label = "Genre",
+                    iconClass = "mdi-drama-masks",
+                    options = genres,
+                    selectedOptions = selectedGenres,
+                    isOpen = genreDropdownOpen,
+                    onToggle = {
+                        genreDropdownOpen = !genreDropdownOpen
+                        subgenreDropdownOpen = false
+                        countryDropdownOpen = false
+                        mediaTypeDropdownOpen = false
+                        renderFiltersSection()
+                    },
+                    onOptionToggle = { value ->
+                        if (value in selectedGenres) {
+                            selectedGenres.remove(value)
+                        } else {
+                            selectedGenres.add(value)
+                        }
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    },
+                    onClear = {
+                        selectedGenres.clear()
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    }
+                )
+                
+                // Subgenre filter
+                renderMultiSelectDropdown(
+                    label = "Subgenre",
+                    iconClass = "mdi-tag-outline",
+                    options = subgenres,
+                    selectedOptions = selectedSubgenres,
+                    isOpen = subgenreDropdownOpen,
+                    onToggle = {
+                        subgenreDropdownOpen = !subgenreDropdownOpen
+                        genreDropdownOpen = false
+                        countryDropdownOpen = false
+                        mediaTypeDropdownOpen = false
+                        renderFiltersSection()
+                    },
+                    onOptionToggle = { value ->
+                        if (value in selectedSubgenres) {
+                            selectedSubgenres.remove(value)
+                        } else {
+                            selectedSubgenres.add(value)
+                        }
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    },
+                    onClear = {
+                        selectedSubgenres.clear()
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    }
+                )
+                
+                // Country filter
+                renderMultiSelectDropdown(
+                    label = "Country",
+                    iconClass = "mdi-earth",
+                    options = countries,
+                    selectedOptions = selectedCountries,
+                    isOpen = countryDropdownOpen,
+                    onToggle = {
+                        countryDropdownOpen = !countryDropdownOpen
+                        genreDropdownOpen = false
+                        subgenreDropdownOpen = false
+                        mediaTypeDropdownOpen = false
+                        renderFiltersSection()
+                    },
+                    onOptionToggle = { value ->
+                        if (value in selectedCountries) {
+                            selectedCountries.remove(value)
+                        } else {
+                            selectedCountries.add(value)
+                        }
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    },
+                    onClear = {
+                        selectedCountries.clear()
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    }
+                )
+                
+                // Media Type filter
+                renderMultiSelectDropdown(
+                    label = "Media Type",
+                    iconClass = "mdi-disc",
+                    options = mediaTypes,
+                    selectedOptions = selectedMediaTypes,
+                    isOpen = mediaTypeDropdownOpen,
+                    onToggle = {
+                        mediaTypeDropdownOpen = !mediaTypeDropdownOpen
+                        genreDropdownOpen = false
+                        subgenreDropdownOpen = false
+                        countryDropdownOpen = false
+                        renderFiltersSection()
+                    },
+                    onOptionToggle = { value ->
+                        if (value in selectedMediaTypes) {
+                            selectedMediaTypes.remove(value)
+                        } else {
+                            selectedMediaTypes.add(value)
+                        }
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    },
+                    onClear = {
+                        selectedMediaTypes.clear()
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    }
+                )
+            }
         }
     }
 
     private suspend fun updateCount() {
         availableCount = fetchUnwatchedMovieCount(
-            genre = selectedGenre,
-            subgenre = selectedSubgenre,
-            country = selectedCountry,
-            mediaType = selectedMediaType
+            genres = selectedGenres,
+            subgenres = selectedSubgenres,
+            countries = selectedCountries,
+            mediaTypes = selectedMediaTypes
         )
     }
 
@@ -624,17 +1174,19 @@ class RandomMoviePicker(
     }
 
     private fun clearFilters() {
-        selectedGenre = null
-        selectedSubgenre = null
-        selectedCountry = null
-        selectedMediaType = null
+        selectedGenres.clear()
+        selectedSubgenres.clear()
+        selectedCountries.clear()
+        selectedMediaTypes.clear()
 
-        // Reset select elements
-        listOf("filter-genre", "filter-subgenre", "filter-country", "filter-media-type").forEach { id ->
-            val select = document.getElementById(id) as? HTMLSelectElement
-            select?.value = ""
-        }
+        // Close all dropdowns
+        genreDropdownOpen = false
+        subgenreDropdownOpen = false
+        countryDropdownOpen = false
+        mediaTypeDropdownOpen = false
 
+        // Re-render filters and update count
+        renderFiltersSection()
         mainScope.launch {
             updateCount()
             updateCountDisplay()
@@ -658,10 +1210,10 @@ class RandomMoviePicker(
         mainScope.launch {
             try {
                 val movie = fetchRandomUnwatchedMovie(
-                    genre = selectedGenre,
-                    subgenre = selectedSubgenre,
-                    country = selectedCountry,
-                    mediaType = selectedMediaType
+                    genres = selectedGenres,
+                    subgenres = selectedSubgenres,
+                    countries = selectedCountries,
+                    mediaTypes = selectedMediaTypes
                 )
                 pickedMovie = movie
                 isLoading = false
