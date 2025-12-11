@@ -1608,7 +1608,11 @@ class MovieTable(private val container: Element) {
                         onClickFunction = {
                             if (currentPage > 1) {
                                 currentPage--
-                                renderCards(useClientSidePagination = usingClientSideFiltering)
+                                if (usingClientSideFiltering) {
+                                    renderCards(useClientSidePagination = true)
+                                } else {
+                                    mainScope.launch { loadMovies() }
+                                }
                             }
                         }
                     }
@@ -1645,7 +1649,11 @@ class MovieTable(private val container: Element) {
                         onClickFunction = {
                             if (currentPage < totalPages) {
                                 currentPage++
-                                renderCards(useClientSidePagination = usingClientSideFiltering)
+                                if (usingClientSideFiltering) {
+                                    renderCards(useClientSidePagination = true)
+                                } else {
+                                    mainScope.launch { loadMovies() }
+                                }
                             }
                         }
                     }
@@ -1680,7 +1688,11 @@ class MovieTable(private val container: Element) {
                                 select?.value?.toIntOrNull()?.let { newSize ->
                                     itemsPerPage = newSize
                                     currentPage = 1
-                                    renderCards(useClientSidePagination = usingClientSideFiltering)
+                                    if (usingClientSideFiltering) {
+                                        renderCards(useClientSidePagination = true)
+                                    } else {
+                                        mainScope.launch { loadMovies() }
+                                    }
                                 }
                             }
                         }
