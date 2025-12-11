@@ -426,18 +426,20 @@ suspend fun fetchAllMediaTypes(): List<String> {
 
 /**
  * Get a random unwatched movie with optional filters.
+ * Supports multiple values per filter (OR logic within each filter type).
  */
 suspend fun fetchRandomUnwatchedMovie(
-    genre: String? = null,
-    subgenre: String? = null,
-    country: String? = null,
-    mediaType: String? = null
+    genres: Set<String> = emptySet(),
+    subgenres: Set<String> = emptySet(),
+    countries: Set<String> = emptySet(),
+    mediaTypes: Set<String> = emptySet()
 ): MovieMetadata? {
     val params = mutableListOf<String>()
-    genre?.let { params.add("genre=$it") }
-    subgenre?.let { params.add("subgenre=$it") }
-    country?.let { params.add("country=$it") }
-    mediaType?.let { params.add("mediaType=$it") }
+    // Pass all selected values as repeated query parameters
+    genres.forEach { params.add("genre=${encodeURIComponent(it)}") }
+    subgenres.forEach { params.add("subgenre=${encodeURIComponent(it)}") }
+    countries.forEach { params.add("country=${encodeURIComponent(it)}") }
+    mediaTypes.forEach { params.add("mediaType=${encodeURIComponent(it)}") }
     
     val queryString = if (params.isNotEmpty()) "?" + params.joinToString("&") else ""
     val response = window.fetch("$API_BASE_URL/movies/random$queryString").await()
@@ -453,18 +455,20 @@ data class CountResponse(val count: Int)
 
 /**
  * Get count of unwatched movies matching filters.
+ * Supports multiple values per filter (OR logic within each filter type).
  */
 suspend fun fetchUnwatchedMovieCount(
-    genre: String? = null,
-    subgenre: String? = null,
-    country: String? = null,
-    mediaType: String? = null
+    genres: Set<String> = emptySet(),
+    subgenres: Set<String> = emptySet(),
+    countries: Set<String> = emptySet(),
+    mediaTypes: Set<String> = emptySet()
 ): Int {
     val params = mutableListOf<String>()
-    genre?.let { params.add("genre=$it") }
-    subgenre?.let { params.add("subgenre=$it") }
-    country?.let { params.add("country=$it") }
-    mediaType?.let { params.add("mediaType=$it") }
+    // Pass all selected values as repeated query parameters
+    genres.forEach { params.add("genre=${encodeURIComponent(it)}") }
+    subgenres.forEach { params.add("subgenre=${encodeURIComponent(it)}") }
+    countries.forEach { params.add("country=${encodeURIComponent(it)}") }
+    mediaTypes.forEach { params.add("mediaType=${encodeURIComponent(it)}") }
     
     val queryString = if (params.isNotEmpty()) "?" + params.joinToString("&") else ""
     val response = window.fetch("$API_BASE_URL/movies/random/count$queryString").await()
@@ -473,3 +477,5 @@ suspend fun fetchUnwatchedMovieCount(
     val result: CountResponse = Json.decodeFromString(json)
     return result.count
 }
+
+private fun encodeURIComponent(s: String): String = js("encodeURIComponent(s)") as String

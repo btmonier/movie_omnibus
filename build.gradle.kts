@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "org.btmonier"
-version = "0.1"
+version = "0.2"
 
 repositories {
     mavenCentral()
@@ -356,6 +356,13 @@ tasks.register<Exec>("backupDatabase") {
     }
 }
 
+tasks.register<Exec>("devAll") {
+    dependsOn("jsBrowserDevelopmentWebpack")
+    finalizedBy("runServer")
+}
+
 tasks.named<Test>("jvmTest") {
     useJUnitPlatform()
 }
+
+

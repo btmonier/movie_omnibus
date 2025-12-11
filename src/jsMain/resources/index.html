@@ -4,6 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Movie Omnibus</title>
+    <link rel="icon" type="image/svg+xml" href="icons/movie-open.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css" rel="stylesheet">
     <style>
         body {
             margin: 0;
@@ -13,6 +18,19 @@
             -moz-osx-font-smoothing: grayscale;
             background-color: #ffffff;
             color: #202124;
+        }
+
+        /* Mobile responsive styles for Random Movie Picker action buttons */
+        @media (max-width: 600px) {
+            #action-buttons-container {
+                flex-direction: column !important;
+                align-items: stretch !important;
+            }
+            
+            #action-buttons-container .action-btn {
+                max-width: none !important;
+                width: 100% !important;
+            }
         }
     </style>
 </head>
