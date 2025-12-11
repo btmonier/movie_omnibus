@@ -21,7 +21,7 @@ class MovieTable(private val container: Element) {
     private var sortField: SortField = SortField.TITLE
     private var sortDirection: SortDirection = SortDirection.ASC
 
-    enum class SortField { TITLE, RELEASE_DATE, DATE_ADDED }
+    enum class SortField { TITLE, RELEASE_DATE, DATE_ADDED, RUNTIME }
     enum class SortDirection { ASC, DESC }
 
     // Pagination state (server-provided)
@@ -45,6 +45,8 @@ class MovieTable(private val container: Element) {
     private var subgenreDropdownOpen = false
     private var countryDropdownOpen = false
     private var mediaTypeDropdownOpen = false
+    private var editToolsDropdownOpen = false
+    private var sortDropdownOpen = false
 
     // Dropdown search text
     private var genreSearchText = ""
@@ -68,84 +70,218 @@ class MovieTable(private val container: Element) {
     fun render() {
         container.innerHTML = ""
         container.append {
-            div {
-                style = "max-width: 1400px; margin: 0 auto; padding: 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
-
+            // Navbar
+            nav {
+                style = """
+                    position: sticky;
+                    top: 0;
+                    z-index: 1000;
+                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+                    padding: 0 24px;
+                """.trimIndent()
+                
                 div {
                     style = """
+                        max-width: 1400px;
+                        margin: 0 auto;
                         display: flex;
-                        flex-wrap: wrap;
                         justify-content: space-between;
                         align-items: center;
-                        gap: 16px;
-                        margin-bottom: 24px;
+                        height: 64px;
                     """.trimIndent()
-                    h1 {
-                        style = "color: #202124; font-weight: 400; font-size: 26px; margin: 0;"
-                        +"🎬 The Movie Omnibus"
-                    }
+                    
+                    // Logo/Title
                     div {
-                        style = "display: flex; flex-wrap: wrap; gap: 10px;"
-                        button {
+                        style = """
+                            display: flex;
+                            align-items: center;
+                            gap: 12px;
+                            cursor: pointer;
+                        """.trimIndent()
+                        onClickFunction = {
+                            // Scroll to top or reset view
+                            kotlinx.browser.window.scrollTo(0.0, 0.0)
+                        }
+                        
+                        span {
+                            classes = setOf("mdi", "mdi-movie-open")
+                            style = "font-size: 28px; color: #ffffff;"
+                        }
+                        h1 {
                             style = """
-                                padding: 10px 18px;
-                                font-size: 13px;
+                                font-family: 'Oswald', sans-serif;
+                                font-weight: 500;
+                                font-size: 24px;
+                                color: #ffffff;
+                                margin: 0;
+                                letter-spacing: 1px;
+                            """.trimIndent()
+                            +"The Movie Omnibus"
+                        }
+                    }
+                    
+                    // Nav links
+                    div {
+                        style = "display: flex; align-items: center; gap: 8px;"
+                        
+                        // Random button
+                        a {
+                            style = """
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                padding: 10px 16px;
+                                font-size: 14px;
+                                font-weight: 500;
                                 cursor: pointer;
                                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                                 color: white;
                                 border: none;
-                                border-radius: 8px;
-                                font-weight: 500;
+                                border-radius: 6px;
+                                text-decoration: none;
                                 transition: transform 0.2s, box-shadow 0.2s;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
                             """.trimIndent()
-                            attributes["onmouseover"] = "this.style.transform='scale(1.02)'; this.style.boxShadow='0 4px 12px rgba(102, 126, 234, 0.4)'"
-                            attributes["onmouseout"] = "this.style.transform='scale(1)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.3)'"
-                            +"🎲 Random"
-                            onClickFunction = {
+                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.5)'"
+                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.4)'"
+                            onClickFunction = { e ->
+                                e.preventDefault()
                                 showRandomPicker()
                             }
-                        }
-                        button {
-                            style = """
-                                padding: 10px 18px;
-                                font-size: 13px;
-                                cursor: pointer;
-                                background-color: #ffffff;
-                                color: #1a73e8;
-                                border: 1px solid #dadce0;
-                                border-radius: 8px;
-                                font-weight: 500;
-                                transition: background-color 0.2s;
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#ffffff'"
-                            +"⚙ Genres"
-                            onClickFunction = {
-                                showGenreManagement()
+                            span {
+                                classes = setOf("mdi", "mdi-dice-multiple")
+                                style = "font-size: 18px;"
                             }
+                            span { +"Random" }
                         }
-                        button {
-                            style = """
-                                padding: 10px 18px;
-                                font-size: 13px;
-                                cursor: pointer;
-                                background-color: #1a73e8;
-                                color: white;
-                                border: none;
-                                border-radius: 8px;
-                                font-weight: 500;
-                                transition: background-color 0.2s;
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'"
-                            +"+ Add Movie"
-                            onClickFunction = {
-                                showAddMovieForm()
+                        
+                        // Edit Tools dropdown
+                        div {
+                            id = "edit-tools-dropdown"
+                            style = "position: relative;"
+                            
+                            // Dropdown trigger button
+                            a {
+                                style = """
+                                    display: flex;
+                                    align-items: center;
+                                    gap: 6px;
+                                    padding: 10px 16px;
+                                    font-size: 14px;
+                                    font-weight: 500;
+                                    cursor: pointer;
+                                    background-color: transparent;
+                                    color: #e0e0e0;
+                                    border: 1px solid rgba(255,255,255,0.2);
+                                    border-radius: 6px;
+                                    text-decoration: none;
+                                    transition: all 0.2s;
+                                """.trimIndent()
+                                attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.borderColor='rgba(255,255,255,0.4)'; this.style.color='#ffffff'"
+                                attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.borderColor='rgba(255,255,255,0.2)'; this.style.color='#e0e0e0'"
+                                onClickFunction = { e ->
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    editToolsDropdownOpen = !editToolsDropdownOpen
+                                    updateEditToolsDropdown()
+                                }
+                                span {
+                                    classes = setOf("mdi", "mdi-wrench")
+                                    style = "font-size: 18px;"
+                                }
+                                span { +"Editor Tools" }
+                                span {
+                                    classes = setOf("mdi", "mdi-chevron-down")
+                                    style = "font-size: 16px; margin-left: 2px;"
+                                }
+                            }
+                            
+                            // Dropdown menu (hidden by default)
+                            div {
+                                id = "edit-tools-menu"
+                                style = """
+                                    display: none;
+                                    position: absolute;
+                                    top: 100%;
+                                    right: 0;
+                                    margin-top: 8px;
+                                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                                    border: 1px solid rgba(255,255,255,0.15);
+                                    border-radius: 8px;
+                                    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+                                    min-width: 180px;
+                                    z-index: 1001;
+                                    overflow: hidden;
+                                """.trimIndent()
+                                
+                                // Genres option
+                                a {
+                                    style = """
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                        padding: 12px 16px;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        cursor: pointer;
+                                        color: #e0e0e0;
+                                        text-decoration: none;
+                                        transition: all 0.2s;
+                                        border-bottom: 1px solid rgba(255,255,255,0.1);
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
+                                    onClickFunction = { e ->
+                                        e.preventDefault()
+                                        editToolsDropdownOpen = false
+                                        updateEditToolsDropdown()
+                                        showGenreManagement()
+                                    }
+                                    span {
+                                        classes = setOf("mdi", "mdi-tag-multiple")
+                                        style = "font-size: 18px;"
+                                    }
+                                    span { +"Manage Genres" }
+                                }
+                                
+                                // Add Movie option
+                                a {
+                                    style = """
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                        padding: 12px 16px;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        cursor: pointer;
+                                        color: #e0e0e0;
+                                        text-decoration: none;
+                                        transition: all 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
+                                    onClickFunction = { e ->
+                                        e.preventDefault()
+                                        editToolsDropdownOpen = false
+                                        updateEditToolsDropdown()
+                                        showAddMovieForm()
+                                    }
+                                    span {
+                                        classes = setOf("mdi", "mdi-plus")
+                                        style = "font-size: 18px;"
+                                    }
+                                    span { +"Add Movie" }
+                                }
                             }
                         }
                     }
                 }
+            }
+            
+            // Main content
+            div {
+                style = "max-width: 1400px; margin: 0 auto; padding: 24px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
 
                 // Filters container (will be populated after loading options)
                 div {
@@ -175,6 +311,25 @@ class MovieTable(private val container: Element) {
             renderFilters()
             loadMovies()
         }
+
+        // Close dropdowns when clicking outside
+        document.addEventListener("click", { event ->
+            val target = event.target as? Element
+            
+            // Close Edit Tools dropdown
+            val editToolsDropdown = document.getElementById("edit-tools-dropdown")
+            if (editToolsDropdown != null && target != null && !editToolsDropdown.contains(target)) {
+                editToolsDropdownOpen = false
+                updateEditToolsDropdown()
+            }
+            
+            // Close Sort dropdown
+            val sortDropdown = target?.closest(".sort-dropdown")
+            if (sortDropdown == null && sortDropdownOpen) {
+                sortDropdownOpen = false
+                renderFilters()
+            }
+        })
     }
 
     private suspend fun loadFilterOptions() {
@@ -214,8 +369,12 @@ class MovieTable(private val container: Element) {
                         style = "min-width: 0;"
                         label {
                             htmlFor = "search-input"
-                            style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
-                            +"🔍 Search"
+                            style = "display: flex; align-items: center; gap: 4px; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                            span {
+                                classes = setOf("mdi", "mdi-magnify")
+                                style = "font-size: 16px;"
+                            }
+                            +"Search"
                         }
                         input(type = InputType.text) {
                             id = "search-input"
@@ -249,73 +408,152 @@ class MovieTable(private val container: Element) {
                     div {
                         style = "display: flex; gap: 8px; align-items: flex-end;"
 
+                        // Sort field dropdown (custom with chevrons)
                         div {
+                            style = "position: relative;"
+                            attributes["class"] = "sort-dropdown"
+
                             label {
-                                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
-                                +"↕ Sort by"
+                                style = "display: flex; align-items: center; gap: 4px; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                                span {
+                                    classes = setOf("mdi", "mdi-sort")
+                                    style = "font-size: 16px;"
+                                }
+                                +"Sort by"
                             }
-                            select {
-                                id = "sort-field-select"
+
+                            // Dropdown trigger button
+                            div {
                                 style = """
                                     padding: 10px 14px;
                                     font-size: 14px;
-                                    border: 1px solid #dadce0;
+                                    border: 1px solid ${if (sortDropdownOpen) "#1a73e8" else "#dadce0"};
                                     border-radius: 8px;
                                     background-color: white;
                                     cursor: pointer;
-                                    font-family: 'Roboto', arial, sans-serif;
+                                    display: flex;
+                                    justify-content: space-between;
+                                    align-items: center;
                                     min-width: 140px;
+                                    transition: border-color 0.2s;
+                                    ${if (sortDropdownOpen) "box-shadow: 0 0 0 3px rgba(26,115,232,0.1);" else ""}
                                 """.trimIndent()
-                                onChangeFunction = { event ->
-                                    val select = event.target as HTMLSelectElement
-                                    sortField = when (select.value) {
-                                        "title" -> SortField.TITLE
-                                        "release_date" -> SortField.RELEASE_DATE
-                                        "date_added" -> SortField.DATE_ADDED
-                                        else -> SortField.TITLE
-                                    }
-                                    currentPage = 1
-                                    mainScope.launch { loadMovies() }
+                                attributes["onmouseover"] = if (!sortDropdownOpen) "this.style.borderColor='#bdc1c6'" else ""
+                                attributes["onmouseout"] = if (!sortDropdownOpen) "this.style.borderColor='#dadce0'" else ""
+                                onClickFunction = { event ->
+                                    event.stopPropagation()
+                                    sortDropdownOpen = !sortDropdownOpen
+                                    renderFilters()
                                 }
 
-                                option {
-                                    value = "title"
-                                    selected = sortField == SortField.TITLE
-                                    +"Title"
+                                span {
+                                    style = "color: #202124;"
+                                    +when (sortField) {
+                                        SortField.TITLE -> "Title"
+                                        SortField.RELEASE_DATE -> "Release Year"
+                                        SortField.DATE_ADDED -> "Date Added"
+                                        SortField.RUNTIME -> "Runtime"
+                                    }
                                 }
-                                option {
-                                    value = "release_date"
-                                    selected = sortField == SortField.RELEASE_DATE
-                                    +"Release Year"
+
+                                span {
+                                    classes = setOf("mdi", if (sortDropdownOpen) "mdi-chevron-up" else "mdi-chevron-down")
+                                    style = "color: #5f6368; font-size: 16px; margin-left: 8px;"
                                 }
-                                option {
-                                    value = "date_added"
-                                    selected = sortField == SortField.DATE_ADDED
-                                    +"Date Added"
+                            }
+
+                            // Dropdown menu
+                            if (sortDropdownOpen) {
+                                div {
+                                    style = """
+                                        position: absolute;
+                                        top: 100%;
+                                        left: 0;
+                                        right: 0;
+                                        margin-top: 4px;
+                                        background-color: white;
+                                        border: 1px solid #dadce0;
+                                        border-radius: 8px;
+                                        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                                        z-index: 100;
+                                        overflow: hidden;
+                                    """.trimIndent()
+
+                                    listOf(
+                                        SortField.TITLE to "Title",
+                                        SortField.RELEASE_DATE to "Release Year",
+                                        SortField.DATE_ADDED to "Date Added",
+                                        SortField.RUNTIME to "Runtime"
+                                    ).forEach { (field, label) ->
+                                        div {
+                                            val isSelected = sortField == field
+                                            style = """
+                                                padding: 10px 14px;
+                                                cursor: pointer;
+                                                display: flex;
+                                                align-items: center;
+                                                gap: 8px;
+                                                background-color: ${if (isSelected) "#e8f0fe" else "white"};
+                                                color: ${if (isSelected) "#1a73e8" else "#202124"};
+                                                font-size: 14px;
+                                                transition: background-color 0.15s;
+                                            """.trimIndent()
+                                            attributes["onmouseover"] = "this.style.backgroundColor='${if (isSelected) "#e8f0fe" else "#f8f9fa"}'"
+                                            attributes["onmouseout"] = "this.style.backgroundColor='${if (isSelected) "#e8f0fe" else "white"}'"
+                                            onClickFunction = { event ->
+                                                event.stopPropagation()
+                                                sortField = field
+                                                sortDropdownOpen = false
+                                                currentPage = 1
+                                                renderFilters()
+                                                mainScope.launch { loadMovies() }
+                                            }
+
+                                            if (isSelected) {
+                                                span {
+                                                    classes = setOf("mdi", "mdi-check")
+                                                    style = "font-size: 16px; color: #1a73e8;"
+                                                }
+                                            }
+                                            span { +label }
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        button {
-                            id = "sort-direction-btn"
-                            style = """
-                                padding: 10px 14px;
-                                font-size: 16px;
-                                cursor: pointer;
-                                background-color: white;
-                                color: #5f6368;
-                                border: 1px solid #dadce0;
-                                border-radius: 8px;
-                                transition: background-color 0.2s;
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.backgroundColor='#f1f3f4'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
-                            +(if (sortDirection == SortDirection.ASC) "↑" else "↓")
-                            onClickFunction = {
-                                sortDirection = if (sortDirection == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
-                                currentPage = 1
-                                renderFilters()
-                                mainScope.launch { loadMovies() }
+                        // Sort direction button
+                        div {
+                            label {
+                                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368; visibility: hidden;"
+                                +"Dir"
+                            }
+                            button {
+                                id = "sort-direction-btn"
+                                style = """
+                                    padding: 10px 14px;
+                                    font-size: 18px;
+                                    cursor: pointer;
+                                    background-color: white;
+                                    color: #5f6368;
+                                    border: 1px solid #dadce0;
+                                    border-radius: 8px;
+                                    transition: background-color 0.2s;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: center;
+                                """.trimIndent()
+                                attributes["onmouseover"] = "this.style.backgroundColor='#f1f3f4'"
+                                attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                                span {
+                                    classes = setOf("mdi", if (sortDirection == SortDirection.ASC) "mdi-sort-ascending" else "mdi-sort-descending")
+                                }
+                                onClickFunction = {
+                                    sortDirection = if (sortDirection == SortDirection.ASC) SortDirection.DESC else SortDirection.ASC
+                                    currentPage = 1
+                                    renderFilters()
+                                    mainScope.launch { loadMovies() }
+                                }
                             }
                         }
                     }
@@ -333,7 +571,8 @@ class MovieTable(private val container: Element) {
                     // Genre multi-select dropdown
                     renderMultiSelectDropdown(
                         id = "genre",
-                        label = "🎭 Genres",
+                        label = "Genres",
+                        iconClass = "mdi-drama-masks",
                         options = allGenres,
                         selectedOptions = selectedGenres,
                         isOpen = genreDropdownOpen,
@@ -379,7 +618,8 @@ class MovieTable(private val container: Element) {
                     // Subgenre multi-select dropdown
                     renderMultiSelectDropdown(
                         id = "subgenre",
-                        label = "\uD83D\uDD2C Subgenres",
+                        label = "Subgenres",
+                        iconClass = "mdi-tag-outline",
                         options = allSubgenres,
                         selectedOptions = selectedSubgenres,
                         isOpen = subgenreDropdownOpen,
@@ -425,7 +665,8 @@ class MovieTable(private val container: Element) {
                     // Country multi-select dropdown
                     renderMultiSelectDropdown(
                         id = "country",
-                        label = "🌍 Countries",
+                        label = "Countries",
+                        iconClass = "mdi-earth",
                         options = allCountries,
                         selectedOptions = selectedCountries,
                         isOpen = countryDropdownOpen,
@@ -471,7 +712,8 @@ class MovieTable(private val container: Element) {
                     // Media Type multi-select dropdown
                     renderMultiSelectDropdown(
                         id = "media-type",
-                        label = "💿 Media Type",
+                        label = "Media Type",
+                        iconClass = "mdi-disc",
                         options = allMediaTypes,
                         selectedOptions = selectedMediaTypes,
                         isOpen = mediaTypeDropdownOpen,
@@ -602,7 +844,11 @@ class MovieTable(private val container: Element) {
                             """.trimIndent()
                             attributes["onmouseover"] = "this.style.backgroundColor='#c5221f'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#d93025'"
-                            +"✕ Clear All"
+                            span {
+                                classes = setOf("mdi", "mdi-close")
+                                style = "font-size: 14px; margin-right: 4px;"
+                            }
+                            +"Clear All"
                             onClickFunction = {
                                 resetAllFilters()
                             }
@@ -648,6 +894,7 @@ class MovieTable(private val container: Element) {
     private fun DIV.renderMultiSelectDropdown(
         id: String,
         label: String,
+        iconClass: String? = null,
         options: List<String>,
         selectedOptions: Set<String>,
         isOpen: Boolean,
@@ -669,7 +916,13 @@ class MovieTable(private val container: Element) {
             attributes["class"] = "multi-select-dropdown"
 
             label {
-                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                style = "display: flex; align-items: center; gap: 4px; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368;"
+                if (iconClass != null) {
+                    span {
+                        classes = setOf("mdi", iconClass)
+                        style = "font-size: 16px;"
+                    }
+                }
                 +label
             }
 
@@ -707,8 +960,8 @@ class MovieTable(private val container: Element) {
                 }
 
                 span {
-                    style = "color: #5f6368; font-size: 12px; margin-left: 8px; flex-shrink: 0;"
-                    +(if (isOpen) "▲" else "▼")
+                    classes = setOf("mdi", if (isOpen) "mdi-chevron-up" else "mdi-chevron-down")
+                    style = "color: #5f6368; font-size: 16px; margin-left: 8px; flex-shrink: 0;"
                 }
             }
 
@@ -780,7 +1033,11 @@ class MovieTable(private val container: Element) {
                                 """.trimIndent()
                                 attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
                                 attributes["onmouseout"] = "this.style.backgroundColor='white'"
-                                +"✕ Clear selection"
+                                span {
+                                    classes = setOf("mdi", "mdi-close")
+                                    style = "font-size: 14px; margin-right: 4px;"
+                                }
+                                +"Clear selection"
                                 onClickFunction = { event ->
                                     event.stopPropagation()
                                     onClear()
@@ -825,8 +1082,8 @@ class MovieTable(private val container: Element) {
 
                                     if (isSelected) {
                                         span {
-                                            style = "color: white; font-size: 12px; font-weight: bold;"
-                                            +"✓"
+                                            classes = setOf("mdi", "mdi-check")
+                                            style = "color: white; font-size: 14px;"
                                         }
                                     }
                                 }
@@ -880,7 +1137,9 @@ class MovieTable(private val container: Element) {
                 """.trimIndent()
                 attributes["onmouseover"] = "this.style.opacity='1'"
                 attributes["onmouseout"] = "this.style.opacity='0.7'"
-                +"×"
+                span {
+                    classes = setOf("mdi", "mdi-close")
+                }
                 onClickFunction = { onRemove() }
             }
         }
@@ -982,6 +1241,7 @@ class MovieTable(private val container: Element) {
                 SortField.TITLE -> "title"
                 SortField.RELEASE_DATE -> "release_date"
                 SortField.DATE_ADDED -> "date_added"
+                SortField.RUNTIME -> "runtime"
             }
             val sortDirectionStr = if (sortDirection == SortDirection.ASC) "asc" else "desc"
 
@@ -1045,8 +1305,8 @@ class MovieTable(private val container: Element) {
             div {
                 style = "text-align: center; padding: 60px; color: #5f6368;"
                 div {
+                    classes = setOf("mdi", "mdi-movie-open")
                     style = "font-size: 48px; margin-bottom: 16px; animation: pulse 1.5s ease-in-out infinite;"
-                    +"🎬"
                 }
                 +"Loading movies..."
             }
@@ -1106,8 +1366,8 @@ class MovieTable(private val container: Element) {
                 div {
                     style = "text-align: center; padding: 60px; color: #5f6368; background-color: #f8f9fa; border-radius: 12px;"
                     div {
+                        classes = setOf("mdi", "mdi-movie-search-outline")
                         style = "font-size: 48px; margin-bottom: 16px;"
-                        +"🎬"
                     }
                     +"No movies match your search criteria."
                 }
@@ -1152,20 +1412,29 @@ class MovieTable(private val container: Element) {
                                 // Year and runtime row
                                 div {
                                     style = "display: flex; align-items: center; gap: 12px; font-size: 13px; opacity: 0.9;"
-                                    if (movie.release_date != null) {
+                                    span {
+                                        style = "display: flex; align-items: center; gap: 4px;"
                                         span {
-                                            style = "display: flex; align-items: center; gap: 4px;"
-                                            +"📅 ${movie.release_date}"
+                                            classes = setOf("mdi", "mdi-calendar")
+                                            style = "font-size: 16px;"
                                         }
+                                        val yearStr = movie.release_date?.toString() ?: "NA"
+                                        +yearStr
                                     }
-                                    if (movie.runtime_mins != null) {
+                                    span {
+                                        style = "display: flex; align-items: center; gap: 4px;"
                                         span {
-                                            style = "display: flex; align-items: center; gap: 4px;"
+                                            classes = setOf("mdi", "mdi-clock-outline")
+                                            style = "font-size: 16px;"
+                                        }
+                                        val runtimeStr = if (movie.runtime_mins != null) {
                                             val hours = movie.runtime_mins / 60
                                             val mins = movie.runtime_mins % 60
-                                            val runtimeStr = if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
-                                            +"⏱ $runtimeStr"
+                                            if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                                        } else {
+                                            "NA"
                                         }
+                                        +runtimeStr
                                     }
                                 }
 
@@ -1206,7 +1475,10 @@ class MovieTable(private val container: Element) {
                                 if (movie.country.isNotEmpty()) {
                                     div {
                                         style = "display: flex; align-items: center; gap: 6px; font-size: 12px; color: #5f6368;"
-                                        span { +"🌍" }
+                                        span {
+                                            classes = setOf("mdi", "mdi-earth")
+                                            style = "font-size: 14px;"
+                                        }
                                         span {
                                             +movie.country.take(3).joinToString(" • ")
                                             if (movie.country.size > 3) {
@@ -1240,7 +1512,11 @@ class MovieTable(private val container: Element) {
                                         style = "display: flex; align-items: center; gap: 6px; margin-top: auto; padding-top: 8px; border-top: 1px solid #e8eaed;"
                                         span {
                                             style = "display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; border-radius: 12px; font-size: 11px; font-weight: 600;"
-                                            +"💿 ${movie.physicalMedia.size} ${if (movie.physicalMedia.size == 1) "entry" else "entries"}"
+                                            span {
+                                                classes = setOf("mdi", "mdi-disc")
+                                                style = "font-size: 14px;"
+                                            }
+                                            +"${movie.physicalMedia.size} ${if (movie.physicalMedia.size == 1) "entry" else "entries"}"
                                         }
                                     }
                                 }
@@ -1324,7 +1600,11 @@ class MovieTable(private val container: Element) {
                             attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
                         }
-                        +"← Previous"
+                        span {
+                            classes = setOf("mdi", "mdi-chevron-left")
+                            style = "font-size: 18px;"
+                        }
+                        +"Previous"
                         onClickFunction = {
                             if (currentPage > 1) {
                                 currentPage--
@@ -1357,7 +1637,11 @@ class MovieTable(private val container: Element) {
                             attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
                             attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
                         }
-                        +"Next →"
+                        +"Next"
+                        span {
+                            classes = setOf("mdi", "mdi-chevron-right")
+                            style = "font-size: 18px;"
+                        }
                         onClickFunction = {
                             if (currentPage < totalPages) {
                                 currentPage++
@@ -1403,6 +1687,13 @@ class MovieTable(private val container: Element) {
                     }
                 }
             }
+        }
+    }
+
+    private fun updateEditToolsDropdown() {
+        val menu = document.getElementById("edit-tools-menu")
+        menu?.let {
+            it.asDynamic().style.display = if (editToolsDropdownOpen) "block" else "none"
         }
     }
 

@@ -222,17 +222,18 @@ fun Route.movieRoutes(dao: MovieDao) {
         }
 
         // GET /api/movies/random - Get a random unwatched movie with optional filters
+        // Supports multiple values per filter (OR logic) via repeated query params
         get("/random") {
-            val genre = call.request.queryParameters["genre"]
-            val subgenre = call.request.queryParameters["subgenre"]
-            val country = call.request.queryParameters["country"]
-            val mediaType = call.request.queryParameters["mediaType"]
+            val genres = call.request.queryParameters.getAll("genre") ?: emptyList()
+            val subgenres = call.request.queryParameters.getAll("subgenre") ?: emptyList()
+            val countries = call.request.queryParameters.getAll("country") ?: emptyList()
+            val mediaTypes = call.request.queryParameters.getAll("mediaType") ?: emptyList()
 
             val movie = dao.getRandomUnwatchedMovie(
-                genre = genre,
-                subgenre = subgenre,
-                country = country,
-                mediaType = mediaType
+                genres = genres,
+                subgenres = subgenres,
+                countries = countries,
+                mediaTypes = mediaTypes
             )
 
             if (movie != null) {
@@ -243,17 +244,18 @@ fun Route.movieRoutes(dao: MovieDao) {
         }
 
         // GET /api/movies/random/count - Count unwatched movies with optional filters
+        // Supports multiple values per filter (OR logic) via repeated query params
         get("/random/count") {
-            val genre = call.request.queryParameters["genre"]
-            val subgenre = call.request.queryParameters["subgenre"]
-            val country = call.request.queryParameters["country"]
-            val mediaType = call.request.queryParameters["mediaType"]
+            val genres = call.request.queryParameters.getAll("genre") ?: emptyList()
+            val subgenres = call.request.queryParameters.getAll("subgenre") ?: emptyList()
+            val countries = call.request.queryParameters.getAll("country") ?: emptyList()
+            val mediaTypes = call.request.queryParameters.getAll("mediaType") ?: emptyList()
 
             val count = dao.countUnwatchedMovies(
-                genre = genre,
-                subgenre = subgenre,
-                country = country,
-                mediaType = mediaType
+                genres = genres,
+                subgenres = subgenres,
+                countries = countries,
+                mediaTypes = mediaTypes
             )
 
             call.respond(HttpStatusCode.OK, mapOf("count" to count))

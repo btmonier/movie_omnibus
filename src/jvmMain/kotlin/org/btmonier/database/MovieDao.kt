@@ -32,7 +32,7 @@ class MovieDao(gcsService: GcsService? = null) {
      * @param genre Optional genre filter
      * @param country Optional country filter
      * @param mediaType Optional media type filter
-     * @param sortField Field to sort by: "title", "release_date", or "date_added"
+     * @param sortField Field to sort by: "title", "release_date", "date_added", or "runtime"
      * @param sortDirection Sort direction: "asc" or "desc"
      * @return Pair of (movies, totalCount)
      */
@@ -143,6 +143,7 @@ class MovieDao(gcsService: GcsService? = null) {
         val sortColumn: Expression<*> = when (sortField?.lowercase()) {
             "release_date" -> Movies.releaseDate
             "date_added" -> Movies.createdAt
+            "runtime" -> Movies.runtimeMins
             else -> Movies.title // Default to title
         }
 
@@ -381,11 +382,15 @@ class MovieDao(gcsService: GcsService? = null) {
      * @param mediaType Optional media type filter
      * @return A random movie matching the criteria, or null if none found
      */
+    /**
+     * Get a random unwatched movie with optional filters.
+     * Supports multiple values per filter with OR logic (e.g., Action OR Comedy).
+     */
     suspend fun getRandomUnwatchedMovie(
-        genre: String? = null,
-        subgenre: String? = null,
-        country: String? = null,
-        mediaType: String? = null
+        genres: List<String> = emptyList(),
+        subgenres: List<String> = emptyList(),
+        countries: List<String> = emptyList(),
+        mediaTypes: List<String> = emptyList()
     ): MovieMetadata? = DatabaseFactory.dbQuery {
         // Start with all movie IDs
         var candidateMovieIds = Movies.selectAll().map { it[Movies.id].value }.toSet()
@@ -396,58 +401,62 @@ class MovieDao(gcsService: GcsService? = null) {
             .toSet()
         candidateMovieIds = candidateMovieIds - watchedMovieIds
 
-        // Filter by genre if specified
-        if (!genre.isNullOrBlank()) {
-            val genreRow = Genres.selectAll().where { Genres.name eq genre }.singleOrNull()
-            if (genreRow != null) {
-                val genreId = genreRow[Genres.id].value
-                val movieIdsWithGenre = MovieGenres.selectAll()
-                    .where { MovieGenres.genreId eq genreId }
-                    .map { it[MovieGenres.movieId].value }
-                    .toSet()
-                candidateMovieIds = candidateMovieIds.intersect(movieIdsWithGenre)
-            } else {
-                return@dbQuery null // Genre not found
+        // Filter by genres if specified (OR logic - movie must have at least one of the selected genres)
+        if (genres.isNotEmpty()) {
+            val genreIds = Genres.selectAll()
+                .where { Genres.name inList genres }
+                .map { it[Genres.id].value }
+            
+            if (genreIds.isEmpty()) {
+                return@dbQuery null // No matching genres found
             }
+            
+            val movieIdsWithGenres = MovieGenres.selectAll()
+                .where { MovieGenres.genreId inList genreIds }
+                .map { it[MovieGenres.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithGenres)
         }
 
-        // Filter by subgenre if specified
-        if (!subgenre.isNullOrBlank()) {
-            val subgenreRow = Subgenres.selectAll().where { Subgenres.name eq subgenre }.singleOrNull()
-            if (subgenreRow != null) {
-                val subgenreId = subgenreRow[Subgenres.id].value
-                val movieIdsWithSubgenre = MovieSubgenres.selectAll()
-                    .where { MovieSubgenres.subgenreId eq subgenreId }
-                    .map { it[MovieSubgenres.movieId].value }
-                    .toSet()
-                candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenre)
-            } else {
-                return@dbQuery null // Subgenre not found
+        // Filter by subgenres if specified (OR logic)
+        if (subgenres.isNotEmpty()) {
+            val subgenreIds = Subgenres.selectAll()
+                .where { Subgenres.name inList subgenres }
+                .map { it[Subgenres.id].value }
+            
+            if (subgenreIds.isEmpty()) {
+                return@dbQuery null // No matching subgenres found
             }
+            
+            val movieIdsWithSubgenres = MovieSubgenres.selectAll()
+                .where { MovieSubgenres.subgenreId inList subgenreIds }
+                .map { it[MovieSubgenres.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenres)
         }
 
-        // Filter by country if specified
-        if (!country.isNullOrBlank()) {
-            val movieIdsWithCountry = MovieCountries.selectAll()
-                .where { MovieCountries.country eq country }
+        // Filter by countries if specified (OR logic)
+        if (countries.isNotEmpty()) {
+            val movieIdsWithCountries = MovieCountries.selectAll()
+                .where { MovieCountries.country inList countries }
                 .map { it[MovieCountries.movieId].value }
                 .toSet()
-            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountry)
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountries)
         }
 
-        // Filter by media type if specified
-        if (!mediaType.isNullOrBlank()) {
-            val physicalMediaIdsWithType = PhysicalMediaTypes.selectAll()
-                .where { PhysicalMediaTypes.mediaType eq mediaType }
+        // Filter by media types if specified (OR logic)
+        if (mediaTypes.isNotEmpty()) {
+            val physicalMediaIdsWithTypes = PhysicalMediaTypes.selectAll()
+                .where { PhysicalMediaTypes.mediaType inList mediaTypes }
                 .map { it[PhysicalMediaTypes.physicalMediaId].value }
                 .toSet()
 
-            val movieIdsWithMediaType = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.id inList physicalMediaIdsWithType }
+            val movieIdsWithMediaTypes = PhysicalMedia.selectAll()
+                .where { PhysicalMedia.id inList physicalMediaIdsWithTypes }
                 .map { it[PhysicalMedia.movieId].value }
                 .toSet()
 
-            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaType)
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaTypes)
         }
 
         // Pick a random movie from candidates
@@ -463,12 +472,13 @@ class MovieDao(gcsService: GcsService? = null) {
 
     /**
      * Count unwatched movies with optional filters (for UI display).
+     * Supports multiple values per filter with OR logic.
      */
     suspend fun countUnwatchedMovies(
-        genre: String? = null,
-        subgenre: String? = null,
-        country: String? = null,
-        mediaType: String? = null
+        genres: List<String> = emptyList(),
+        subgenres: List<String> = emptyList(),
+        countries: List<String> = emptyList(),
+        mediaTypes: List<String> = emptyList()
     ): Int = DatabaseFactory.dbQuery {
         var candidateMovieIds = Movies.selectAll().map { it[Movies.id].value }.toSet()
 
@@ -478,55 +488,62 @@ class MovieDao(gcsService: GcsService? = null) {
             .toSet()
         candidateMovieIds = candidateMovieIds - watchedMovieIds
 
-        // Apply same filters as getRandomUnwatchedMovie
-        if (!genre.isNullOrBlank()) {
-            val genreRow = Genres.selectAll().where { Genres.name eq genre }.singleOrNull()
-            if (genreRow != null) {
-                val genreId = genreRow[Genres.id].value
-                val movieIdsWithGenre = MovieGenres.selectAll()
-                    .where { MovieGenres.genreId eq genreId }
-                    .map { it[MovieGenres.movieId].value }
-                    .toSet()
-                candidateMovieIds = candidateMovieIds.intersect(movieIdsWithGenre)
-            } else {
+        // Filter by genres if specified (OR logic)
+        if (genres.isNotEmpty()) {
+            val genreIds = Genres.selectAll()
+                .where { Genres.name inList genres }
+                .map { it[Genres.id].value }
+            
+            if (genreIds.isEmpty()) {
                 return@dbQuery 0
             }
+            
+            val movieIdsWithGenres = MovieGenres.selectAll()
+                .where { MovieGenres.genreId inList genreIds }
+                .map { it[MovieGenres.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithGenres)
         }
 
-        if (!subgenre.isNullOrBlank()) {
-            val subgenreRow = Subgenres.selectAll().where { Subgenres.name eq subgenre }.singleOrNull()
-            if (subgenreRow != null) {
-                val subgenreId = subgenreRow[Subgenres.id].value
-                val movieIdsWithSubgenre = MovieSubgenres.selectAll()
-                    .where { MovieSubgenres.subgenreId eq subgenreId }
-                    .map { it[MovieSubgenres.movieId].value }
-                    .toSet()
-                candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenre)
-            } else {
+        // Filter by subgenres if specified (OR logic)
+        if (subgenres.isNotEmpty()) {
+            val subgenreIds = Subgenres.selectAll()
+                .where { Subgenres.name inList subgenres }
+                .map { it[Subgenres.id].value }
+            
+            if (subgenreIds.isEmpty()) {
                 return@dbQuery 0
             }
+            
+            val movieIdsWithSubgenres = MovieSubgenres.selectAll()
+                .where { MovieSubgenres.subgenreId inList subgenreIds }
+                .map { it[MovieSubgenres.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenres)
         }
 
-        if (!country.isNullOrBlank()) {
-            val movieIdsWithCountry = MovieCountries.selectAll()
-                .where { MovieCountries.country eq country }
+        // Filter by countries if specified (OR logic)
+        if (countries.isNotEmpty()) {
+            val movieIdsWithCountries = MovieCountries.selectAll()
+                .where { MovieCountries.country inList countries }
                 .map { it[MovieCountries.movieId].value }
                 .toSet()
-            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountry)
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountries)
         }
 
-        if (!mediaType.isNullOrBlank()) {
-            val physicalMediaIdsWithType = PhysicalMediaTypes.selectAll()
-                .where { PhysicalMediaTypes.mediaType eq mediaType }
+        // Filter by media types if specified (OR logic)
+        if (mediaTypes.isNotEmpty()) {
+            val physicalMediaIdsWithTypes = PhysicalMediaTypes.selectAll()
+                .where { PhysicalMediaTypes.mediaType inList mediaTypes }
                 .map { it[PhysicalMediaTypes.physicalMediaId].value }
                 .toSet()
 
-            val movieIdsWithMediaType = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.id inList physicalMediaIdsWithType }
+            val movieIdsWithMediaTypes = PhysicalMedia.selectAll()
+                .where { PhysicalMedia.id inList physicalMediaIdsWithTypes }
                 .map { it[PhysicalMedia.movieId].value }
                 .toSet()
 
-            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaType)
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaTypes)
         }
 
         candidateMovieIds.size

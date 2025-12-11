@@ -268,7 +268,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         textAreaField("Countries", "form-countries", movie?.country?.joinToString(", ") ?: "", "USA, France, Japan (comma-separated)")
         textAreaField("Cast", "form-cast", movie?.cast?.joinToString(", ") ?: "", "Actor 1, Actor 2 (comma-separated)")
         inputField("Release Year", "form-release-year", movie?.release_date?.toString() ?: "", "2024", required = false)
-        inputField("Runtime (minutes)", "form-runtime", movie?.runtime_mins?.toString() ?: "", "120", required = false)
+        inputField("Runtime", "form-runtime", formatRuntimeForInput(movie?.runtime_mins), "1h 57m or 117", required = false)
 
         // Physical Media Section (only show when editing existing movie)
         if (movie?.id != null) {
@@ -612,7 +612,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
             val releaseYear = if (releaseYearStr.isNotBlank()) releaseYearStr.toIntOrNull() else null
 
             val runtimeStr = (document.getElementById("form-runtime") as HTMLInputElement).value.trim()
-            val runtime = if (runtimeStr.isNotBlank()) runtimeStr.toIntOrNull() else null
+            val runtime = if (runtimeStr.isNotBlank()) parseRuntime(runtimeStr) else null
 
             val movie = MovieMetadata(
                 url = url,
@@ -882,6 +882,49 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         } catch (e: Exception) {
             console.error("Error fetching movie:", e)
             null
+        }
+    }
+
+    /**
+     * Parses a runtime string into total minutes.
+     * Supports formats: "1h 57m", "1h57m", "2h", "90m", "117", etc.
+     */
+    private fun parseRuntime(input: String): Int? {
+        val trimmed = input.trim().lowercase()
+        
+        // Try parsing as plain number (minutes)
+        trimmed.toIntOrNull()?.let { return it }
+        
+        // Parse hours and minutes format
+        var totalMinutes = 0
+        
+        // Match hours: "1h", "2h", etc.
+        val hoursRegex = """(\d+)\s*h""".toRegex()
+        hoursRegex.find(trimmed)?.let { match ->
+            totalMinutes += match.groupValues[1].toInt() * 60
+        }
+        
+        // Match minutes: "57m", "30m", etc.
+        val minutesRegex = """(\d+)\s*m""".toRegex()
+        minutesRegex.find(trimmed)?.let { match ->
+            totalMinutes += match.groupValues[1].toInt()
+        }
+        
+        return if (totalMinutes > 0) totalMinutes else null
+    }
+
+    /**
+     * Formats runtime minutes for display in the input field.
+     * Returns "Xh Ym" format or empty string if null.
+     */
+    private fun formatRuntimeForInput(minutes: Int?): String {
+        if (minutes == null) return ""
+        val hours = minutes / 60
+        val mins = minutes % 60
+        return when {
+            hours > 0 && mins > 0 -> "${hours}h ${mins}m"
+            hours > 0 -> "${hours}h"
+            else -> "${mins}m"
         }
     }
 }
