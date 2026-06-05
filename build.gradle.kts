@@ -356,7 +356,9 @@ tasks.register<Exec>("backupDatabase") {
     }
 }
 
-tasks.register<Exec>("devAll") {
+tasks.register("devAll") {
+    group = "application"
+    description = "Build the JS bundle and run the dev server"
     dependsOn("jsBrowserDevelopmentWebpack")
     finalizedBy("runServer")
 }
