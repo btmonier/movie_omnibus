@@ -6,6 +6,9 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.await
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import org.w3c.fetch.RequestInit
 
@@ -142,11 +145,33 @@ suspend fun createMovie(movie: MovieMetadata): MovieMetadata {
 
     if (!response.ok) {
         val errorText = response.text().await()
-        throw Exception("Failed to create movie: $errorText")
+        val serverMessage = extractErrorMessage(errorText) ?: errorText
+        // 409 Conflict means the movie (by normalized Letterboxd URL) already exists.
+        if (response.status.toInt() == 409) {
+            throw MovieAlreadyExistsException(serverMessage)
+        }
+        throw Exception("Failed to create movie: $serverMessage")
     }
 
     val jsonText = response.text().await()
     return Json.decodeFromString(MovieMetadata.serializer(), jsonText)
+}
+
+/**
+ * Thrown when the backend rejects a create because the movie already exists (HTTP 409).
+ */
+class MovieAlreadyExistsException(message: String) : Exception(message)
+
+/**
+ * Best-effort extraction of the `error` field from a JSON error body like {"error": "..."}.
+ * Returns null if the body can't be parsed as such.
+ */
+private fun extractErrorMessage(body: String): String? {
+    return try {
+        Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.contentOrNull
+    } catch (e: Throwable) {
+        null
+    }
 }
 
 /**

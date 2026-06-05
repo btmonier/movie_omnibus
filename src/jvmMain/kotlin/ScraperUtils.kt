@@ -7,6 +7,46 @@ import org.jsoup.nodes.Document
  */
 object ScraperUtils {
     /**
+     * Normalizes a Letterboxd film URL so that equivalent URLs compare equal.
+     *
+     * Handles common hand-typed variations: surrounding whitespace, scheme/host casing,
+     * `http` vs `https`, a leading `www.`, query strings/fragments, and a missing or
+     * duplicated trailing slash. The path itself (the film slug) keeps its original casing
+     * since Letterboxd slugs are case-sensitive.
+     *
+     * @param url The raw URL entered by the user or scraped from a page
+     * @return A canonical form suitable for duplicate comparison and storage
+     */
+    fun normalizeLetterboxdUrl(url: String): String {
+        var working = url.trim()
+        if (working.isEmpty()) return working
+
+        // Strip query string and fragment.
+        working = working.substringBefore("?").substringBefore("#")
+
+        // Split scheme from the remainder so we can lowercase the host without touching the path.
+        val schemeSeparator = "://"
+        val schemeIndex = working.indexOf(schemeSeparator)
+        var remainder = if (schemeIndex >= 0) {
+            working.substring(schemeIndex + schemeSeparator.length)
+        } else {
+            working
+        }
+
+        // Lowercase + drop "www." on the host portion only (everything up to the first slash).
+        val firstSlash = remainder.indexOf('/')
+        val host = if (firstSlash >= 0) remainder.substring(0, firstSlash) else remainder
+        val path = if (firstSlash >= 0) remainder.substring(firstSlash) else ""
+        val normalizedHost = host.lowercase().removePrefix("www.")
+        remainder = normalizedHost + path
+
+        // Force https and collapse to exactly one trailing slash.
+        var normalized = "https://$remainder"
+        normalized = normalized.trimEnd('/') + "/"
+        return normalized
+    }
+
+    /**
      * Scrapes elements with class "text-slug" that have href attributes containing the given pattern.
      *
      * @param doc The JSoup document to scrape

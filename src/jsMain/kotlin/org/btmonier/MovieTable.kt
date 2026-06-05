@@ -1899,6 +1899,12 @@ class MovieTable(private val container: Element) {
                 title = "Success",
                 message = "Movie created successfully!"
             )
+        } catch (e: MovieAlreadyExistsException) {
+            alertDialog.show(
+                title = "Movie Already Exists",
+                message = e.message ?: "This movie is already in your collection."
+            )
+            throw e
         } catch (e: Exception) {
             alertDialog.show(
                 title = "Error",

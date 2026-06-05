@@ -666,6 +666,9 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                 try {
                     onSave(movie)
                     close()
+                } catch (e: MovieAlreadyExistsException) {
+                    // The "Movie Already Exists" dialog is shown by the caller.
+                    // Keep the form open so the user can correct the URL.
                 } catch (e: Exception) {
                     alertDialog.show(
                         title = "Error",

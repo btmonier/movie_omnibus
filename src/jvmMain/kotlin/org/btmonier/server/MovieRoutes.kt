@@ -71,8 +71,8 @@ fun Route.movieRoutes(dao: MovieDao) {
                     return@post
                 }
 
-                // Check if movie already exists
-                val existingMovie = dao.getMovieByUrl(url)
+                // Check if movie already exists (by normalized URL, so variants are caught)
+                val existingMovie = dao.getMovieByUrl(ScraperUtils.normalizeLetterboxdUrl(url))
                 if (existingMovie != null) {
                     call.respond(HttpStatusCode.OK, ScrapeResponse(
                         success = false,
@@ -284,13 +284,20 @@ fun Route.movieRoutes(dao: MovieDao) {
                     return@post
                 }
 
-                // Check if movie already exists
-                if (dao.movieExists(movie.url)) {
-                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "Movie with this URL already exists"))
+                // Normalize the Letterboxd URL so hand-typed variants (trailing slash,
+                // http/https, www, query params) are treated as the same movie.
+                val normalizedUrl = ScraperUtils.normalizeLetterboxdUrl(movie.url)
+
+                // Check if movie already exists (by normalized URL)
+                val existingMovie = dao.getMovieByUrl(normalizedUrl)
+                if (existingMovie != null) {
+                    call.respond(HttpStatusCode.Conflict, mapOf(
+                        "error" to "Movie \"${existingMovie.title}\" already exists in your collection"
+                    ))
                     return@post
                 }
 
-                val movieId = dao.createMovie(movie)
+                val movieId = dao.createMovie(movie.copy(url = normalizedUrl))
                 val createdMovie = dao.getMovieById(movieId)
 
                 if (createdMovie != null) {
