@@ -74,6 +74,7 @@ suspend fun fetchMoviesPaginated(
     search: String? = null,
     genre: String? = null,
     subgenre: String? = null,
+    collection: String? = null,
     country: String? = null,
     mediaType: String? = null,
     sortField: String? = null,
@@ -85,6 +86,7 @@ suspend fun fetchMoviesPaginated(
     search?.let { if (it.isNotBlank()) params.add("search=$it") }
     genre?.let { if (it.isNotBlank()) params.add("genre=$it") }
     subgenre?.let { if (it.isNotBlank()) params.add("subgenre=$it") }
+    collection?.let { if (it.isNotBlank()) params.add("collection=$it") }
     country?.let { if (it.isNotBlank()) params.add("country=$it") }
     mediaType?.let { if (it.isNotBlank()) params.add("mediaType=$it") }
     sortField?.let { if (it.isNotBlank()) params.add("sortField=$it") }
@@ -115,6 +117,15 @@ suspend fun fetchGenreOptions(): List<String> {
  */
 suspend fun fetchSubgenreOptions(): List<String> {
     val response = window.fetch("$API_BASE_URL/movies/subgenres").await()
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+/**
+ * Fetch filter options for collections (as strings) - only returns collections assigned to movies.
+ */
+suspend fun fetchCollectionOptions(): List<String> {
+    val response = window.fetch("$API_BASE_URL/movies/collections").await()
     val json = response.text().await()
     return Json.decodeFromString(json)
 }
@@ -342,6 +353,67 @@ suspend fun deleteSubgenre(id: Int): Boolean {
     return response.ok
 }
 
+// ==================== Collection API ====================
+
+@kotlinx.serialization.Serializable
+data class CollectionResponse(
+    val id: Int,
+    val name: String,
+    val description: String? = null
+)
+
+@kotlinx.serialization.Serializable
+private data class CollectionRequestBody(
+    val name: String,
+    val description: String? = null
+)
+
+suspend fun fetchAllCollections(): List<CollectionResponse> {
+    val response = window.fetch("$API_BASE_URL/collections").await()
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+suspend fun createCollection(name: String, description: String? = null): CollectionResponse {
+    val response = window.fetch("$API_BASE_URL/collections", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(CollectionRequestBody.serializer(), CollectionRequestBody(name, description))
+    )).await()
+
+    if (!response.ok) {
+        val errorText = response.text().await()
+        throw Exception("Failed to create collection: $errorText")
+    }
+
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+suspend fun updateCollection(id: Int, name: String, description: String? = null): CollectionResponse {
+    val response = window.fetch("$API_BASE_URL/collections/$id", RequestInit(
+        method = "PUT",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(CollectionRequestBody.serializer(), CollectionRequestBody(name, description))
+    )).await()
+
+    if (!response.ok) {
+        val errorText = response.text().await()
+        throw Exception("Failed to update collection: $errorText")
+    }
+
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
+suspend fun deleteCollection(id: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/collections/$id", RequestInit(
+        method = "DELETE"
+    )).await()
+
+    return response.ok
+}
+
 // ==================== Distributor API ====================
 
 @kotlinx.serialization.Serializable
@@ -431,6 +503,7 @@ suspend fun fetchAllMediaTypes(): List<String> {
 suspend fun fetchRandomUnwatchedMovie(
     genres: Set<String> = emptySet(),
     subgenres: Set<String> = emptySet(),
+    collections: Set<String> = emptySet(),
     countries: Set<String> = emptySet(),
     mediaTypes: Set<String> = emptySet()
 ): MovieMetadata? {
@@ -438,6 +511,7 @@ suspend fun fetchRandomUnwatchedMovie(
     // Pass all selected values as repeated query parameters
     genres.forEach { params.add("genre=${encodeURIComponent(it)}") }
     subgenres.forEach { params.add("subgenre=${encodeURIComponent(it)}") }
+    collections.forEach { params.add("collection=${encodeURIComponent(it)}") }
     countries.forEach { params.add("country=${encodeURIComponent(it)}") }
     mediaTypes.forEach { params.add("mediaType=${encodeURIComponent(it)}") }
     
@@ -460,6 +534,7 @@ data class CountResponse(val count: Int)
 suspend fun fetchUnwatchedMovieCount(
     genres: Set<String> = emptySet(),
     subgenres: Set<String> = emptySet(),
+    collections: Set<String> = emptySet(),
     countries: Set<String> = emptySet(),
     mediaTypes: Set<String> = emptySet()
 ): Int {
@@ -467,6 +542,7 @@ suspend fun fetchUnwatchedMovieCount(
     // Pass all selected values as repeated query parameters
     genres.forEach { params.add("genre=${encodeURIComponent(it)}") }
     subgenres.forEach { params.add("subgenre=${encodeURIComponent(it)}") }
+    collections.forEach { params.add("collection=${encodeURIComponent(it)}") }
     countries.forEach { params.add("country=${encodeURIComponent(it)}") }
     mediaTypes.forEach { params.add("mediaType=${encodeURIComponent(it)}") }
     

@@ -16,6 +16,7 @@ class MovieDao(gcsService: GcsService? = null) {
     private val physicalMediaDao = PhysicalMediaDao(gcsService)
     private val watchedDao = WatchedDao()
     private val genreDao = GenreDao()
+    private val collectionDao = CollectionDao()
 
     /**
      * Get all movies from the database.
@@ -42,6 +43,7 @@ class MovieDao(gcsService: GcsService? = null) {
         search: String? = null,
         genre: String? = null,
         subgenre: String? = null,
+        collection: String? = null,
         country: String? = null,
         mediaType: String? = null,
         sortField: String? = null,
@@ -97,6 +99,23 @@ class MovieDao(gcsService: GcsService? = null) {
                 candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithSubgenre) ?: movieIdsWithSubgenre
             } else {
                 // Subgenre not found, return empty results
+                return@dbQuery Pair(emptyList(), 0)
+            }
+        }
+
+        // Filter by collection
+        if (!collection.isNullOrBlank()) {
+            val collectionRow = Collections.selectAll().where { Collections.name eq collection }.singleOrNull()
+            if (collectionRow != null) {
+                val collectionId = collectionRow[Collections.id].value
+                val movieIdsWithCollection = MovieCollections.selectAll()
+                    .where { MovieCollections.collectionId eq collectionId }
+                    .map { it[MovieCollections.movieId].value }
+                    .toSet()
+
+                candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithCollection) ?: movieIdsWithCollection
+            } else {
+                // Collection not found, return empty results
                 return@dbQuery Pair(emptyList(), 0)
             }
         }
@@ -256,6 +275,7 @@ class MovieDao(gcsService: GcsService? = null) {
         insertAlternateTitles(movieId.value, movie.alternateTitles)
         insertGenres(movieId.value, movie.genres)
         insertSubgenres(movieId.value, movie.subgenres)
+        insertCollections(movieId.value, movie.collections)
         insertThemes(movieId.value, movie.themes)
         insertCountries(movieId.value, movie.country)
         insertCast(movieId.value, movie.cast)
@@ -281,6 +301,7 @@ class MovieDao(gcsService: GcsService? = null) {
             MovieAlternateTitles.deleteWhere(op = { MovieAlternateTitles.movieId.eq(id) })
             MovieGenres.deleteWhere(op = { MovieGenres.movieId.eq(id) })
             MovieSubgenres.deleteWhere(op = { MovieSubgenres.movieId.eq(id) })
+            MovieCollections.deleteWhere(op = { MovieCollections.movieId.eq(id) })
             MovieThemes.deleteWhere(op = { MovieThemes.movieId.eq(id) })
             MovieCountries.deleteWhere(op = { MovieCountries.movieId.eq(id) })
             MovieCast.deleteWhere(op = { MovieCast.movieId.eq(id) })
@@ -290,6 +311,7 @@ class MovieDao(gcsService: GcsService? = null) {
             insertAlternateTitles(id, movie.alternateTitles)
             insertGenres(id, movie.genres)
             insertSubgenres(id, movie.subgenres)
+            insertCollections(id, movie.collections)
             insertThemes(id, movie.themes)
             insertCountries(id, movie.country)
             insertCast(id, movie.cast)
@@ -307,6 +329,7 @@ class MovieDao(gcsService: GcsService? = null) {
         MovieAlternateTitles.deleteWhere(op = { MovieAlternateTitles.movieId.eq(id) })
         MovieGenres.deleteWhere(op = { MovieGenres.movieId.eq(id) })
         MovieSubgenres.deleteWhere(op = { MovieSubgenres.movieId.eq(id) })
+        MovieCollections.deleteWhere(op = { MovieCollections.movieId.eq(id) })
         MovieThemes.deleteWhere(op = { MovieThemes.movieId.eq(id) })
         MovieCountries.deleteWhere(op = { MovieCountries.movieId.eq(id) })
         MovieCast.deleteWhere(op = { MovieCast.movieId.eq(id) })
@@ -355,6 +378,18 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     /**
+     * Get all unique collections from the database that are assigned to at least one movie (for filtering).
+     */
+    suspend fun getAllCollections(): List<String> = DatabaseFactory.dbQuery {
+        // Use JOIN with DISTINCT at SQL level for efficiency
+        (Collections innerJoin MovieCollections)
+            .select(Collections.name)
+            .withDistinct()
+            .orderBy(Collections.name to SortOrder.ASC)
+            .map { it[Collections.name] }
+    }
+
+    /**
      * Get all unique countries from the database (for filtering).
      */
     suspend fun getAllCountries(): List<String> = DatabaseFactory.dbQuery {
@@ -389,6 +424,7 @@ class MovieDao(gcsService: GcsService? = null) {
     suspend fun getRandomUnwatchedMovie(
         genres: List<String> = emptyList(),
         subgenres: List<String> = emptyList(),
+        collections: List<String> = emptyList(),
         countries: List<String> = emptyList(),
         mediaTypes: List<String> = emptyList()
     ): MovieMetadata? = DatabaseFactory.dbQuery {
@@ -435,6 +471,23 @@ class MovieDao(gcsService: GcsService? = null) {
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenres)
         }
 
+        // Filter by collections if specified (OR logic)
+        if (collections.isNotEmpty()) {
+            val collectionIds = Collections.selectAll()
+                .where { Collections.name inList collections }
+                .map { it[Collections.id].value }
+
+            if (collectionIds.isEmpty()) {
+                return@dbQuery null // No matching collections found
+            }
+
+            val movieIdsWithCollections = MovieCollections.selectAll()
+                .where { MovieCollections.collectionId inList collectionIds }
+                .map { it[MovieCollections.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCollections)
+        }
+
         // Filter by countries if specified (OR logic)
         if (countries.isNotEmpty()) {
             val movieIdsWithCountries = MovieCountries.selectAll()
@@ -477,6 +530,7 @@ class MovieDao(gcsService: GcsService? = null) {
     suspend fun countUnwatchedMovies(
         genres: List<String> = emptyList(),
         subgenres: List<String> = emptyList(),
+        collections: List<String> = emptyList(),
         countries: List<String> = emptyList(),
         mediaTypes: List<String> = emptyList()
     ): Int = DatabaseFactory.dbQuery {
@@ -520,6 +574,23 @@ class MovieDao(gcsService: GcsService? = null) {
                 .map { it[MovieSubgenres.movieId].value }
                 .toSet()
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithSubgenres)
+        }
+
+        // Filter by collections if specified (OR logic)
+        if (collections.isNotEmpty()) {
+            val collectionIds = Collections.selectAll()
+                .where { Collections.name inList collections }
+                .map { it[Collections.id].value }
+
+            if (collectionIds.isEmpty()) {
+                return@dbQuery 0
+            }
+
+            val movieIdsWithCollections = MovieCollections.selectAll()
+                .where { MovieCollections.collectionId inList collectionIds }
+                .map { it[MovieCollections.movieId].value }
+                .toSet()
+            candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCollections)
         }
 
         // Filter by countries if specified (OR logic)
@@ -581,6 +652,17 @@ class MovieDao(gcsService: GcsService? = null) {
         }
     }
 
+    private suspend fun insertCollections(movieId: Int, collections: List<String>) {
+        collections.forEach { collectionName ->
+            // Get or create the collection
+            val collectionId = collectionDao.getOrCreateCollection(collectionName)
+            MovieCollections.insert {
+                it[MovieCollections.movieId] = movieId
+                it[MovieCollections.collectionId] = collectionId
+            }
+        }
+    }
+
     private fun insertThemes(movieId: Int, themes: List<String>) {
         themes.forEach { theme ->
             MovieThemes.insert {
@@ -637,6 +719,11 @@ class MovieDao(gcsService: GcsService? = null) {
             .where { MovieSubgenres.movieId eq movieId }
             .map { it[Subgenres.name] }
 
+        val collections = (MovieCollections innerJoin Collections)
+            .select(Collections.name)
+            .where { MovieCollections.movieId eq movieId }
+            .map { it[Collections.name] }
+
         val themes = MovieThemes.selectAll().where { MovieThemes.movieId eq movieId }
             .map { it[MovieThemes.theme] }
 
@@ -659,6 +746,7 @@ class MovieDao(gcsService: GcsService? = null) {
             alternateTitles = alternateTitles,
             genres = genres,
             subgenres = subgenres,
+            collections = collections,
             themes = themes,
             country = countries,
             cast = cast,

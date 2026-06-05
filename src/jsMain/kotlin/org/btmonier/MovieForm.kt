@@ -19,8 +19,10 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
     private val alertDialog = AlertDialog(container)
     private var genreSelector: GenreSelector? = null
     private var subgenreSelector: GenreSelector? = null
+    private var collectionSelector: GenreSelector? = null
     private var selectedGenres: List<String> = emptyList()
     private var selectedSubgenres: List<String> = emptyList()
+    private var selectedCollections: List<String> = emptyList()
 
     /**
      * Show the form for creating a new movie.
@@ -29,6 +31,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         editingMovie = null
         selectedGenres = emptyList()
         selectedSubgenres = emptyList()
+        selectedCollections = emptyList()
         render()
     }
 
@@ -41,6 +44,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         editingMovie = scrapedMovie.copy(id = null)
         selectedGenres = scrapedMovie.genres
         selectedSubgenres = scrapedMovie.subgenres
+        selectedCollections = scrapedMovie.collections
         render()
     }
 
@@ -51,6 +55,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         editingMovie = movie
         selectedGenres = movie.genres
         selectedSubgenres = movie.subgenres
+        selectedCollections = movie.collections
         render()
     }
 
@@ -81,6 +86,14 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                     align-items: center;
                     z-index: 1000;
                 """.trimIndent()
+
+                // Close the modal when clicking on the backdrop (outside the content).
+                onClickFunction = { e ->
+                    if (e.target == e.currentTarget) {
+                        close()
+                        onCancel()
+                    }
+                }
 
                 div {
                     style = """
@@ -182,6 +195,18 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
             }
         )
         subgenreSelector?.render()
+
+        // Initialize collection selector
+        collectionSelector = GenreSelector(
+            containerId = "form-collections-container",
+            label = "Collections",
+            type = GenreSelector.SelectorType.COLLECTION,
+            selectedItems = selectedCollections,
+            onItemsChanged = { items ->
+                selectedCollections = items
+            }
+        )
+        collectionSelector?.render()
     }
 
     private fun DIV.renderFormFields() {
@@ -262,6 +287,11 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         // Subgenre selector placeholder
         div {
             id = "form-subgenres-container"
+        }
+
+        // Collection selector placeholder
+        div {
+            id = "form-collections-container"
         }
 
         textAreaField("Themes", "form-themes", movie?.themes?.joinToString(", ") ?: "", "Coming of Age, Love, Revenge (comma-separated)")
@@ -597,9 +627,10 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
             val alternateTitles = (document.getElementById("form-alternate-titles") as HTMLTextAreaElement).value
                 .split(",").map { it.trim() }.filter { it.isNotBlank() }
 
-            // Get genres and subgenres from the selectors
+            // Get genres, subgenres, and collections from the selectors
             val genres = selectedGenres
             val subgenres = selectedSubgenres
+            val collections = selectedCollections
 
             val themes = (document.getElementById("form-themes") as HTMLTextAreaElement).value
                 .split(",").map { it.trim() }.filter { it.isNotBlank() }
@@ -621,6 +652,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                 alternateTitles = alternateTitles,
                 genres = genres,
                 subgenres = subgenres,
+                collections = collections,
                 themes = themes,
                 country = countries,
                 cast = cast,

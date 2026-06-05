@@ -45,6 +45,7 @@ class DatabaseReset : CliktCommand(name = "reset-database") {
                 MovieCast,
                 MovieCountries,
                 MovieThemes,
+                MovieCollections,
                 MovieSubgenres,
                 MovieGenres,
                 MovieAlternateTitles,
@@ -58,8 +59,10 @@ class DatabaseReset : CliktCommand(name = "reset-database") {
             SchemaUtils.create(
                 Movies,
                 MovieAlternateTitles,
+                Collections,
                 MovieGenres,
                 MovieSubgenres,
+                MovieCollections,
                 MovieThemes,
                 MovieCountries,
                 MovieCast,

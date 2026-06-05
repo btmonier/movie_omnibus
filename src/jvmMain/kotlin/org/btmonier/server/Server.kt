@@ -14,6 +14,7 @@ import io.ktor.server.routing.*
 import io.ktor.server.http.content.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import org.btmonier.database.CollectionDao
 import org.btmonier.database.DatabaseFactory
 import org.btmonier.database.GenreDao
 import org.btmonier.database.MovieDao
@@ -148,6 +149,7 @@ fun Application.configureServer() {
     val movieDao = MovieDao(gcsService)
     val physicalMediaDao = PhysicalMediaDao(gcsService)
     val genreDao = GenreDao()
+    val collectionDao = CollectionDao()
 
     // Configure JSON serialization
     install(ContentNegotiation) {
@@ -210,6 +212,7 @@ fun Application.configureServer() {
         physicalMediaRoutes(movieDao, physicalMediaDao)
         watchedRoutes()
         genreRoutes(genreDao)
+        collectionRoutes(collectionDao)
 
         // Health check endpoint
         get("/health") {

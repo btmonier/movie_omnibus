@@ -168,6 +168,21 @@ class MovieMetadataModal(
                             }
                         }
 
+                        // Collections
+                        if (movie.collections.isNotEmpty()) {
+                            metadataRow("Collections") {
+                                div {
+                                    style = "display: flex; flex-wrap: wrap; gap: 8px;"
+                                    movie.collections.forEach { collection ->
+                                        span {
+                                            style = "padding: 6px 12px; background-color: #fff0f6; color: #b5179e; border-radius: 16px; font-size: 13px; font-weight: 500;"
+                                            +collection
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         // Themes
                         if (movie.themes.isNotEmpty()) {
                             metadataRow("Themes") {

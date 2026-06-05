@@ -14,6 +14,7 @@ class MovieTable(private val container: Element) {
     private var searchText = ""
     private var selectedGenres: MutableSet<String> = mutableSetOf()
     private var selectedSubgenres: MutableSet<String> = mutableSetOf()
+    private var selectedCollections: MutableSet<String> = mutableSetOf()
     private var selectedCountries: MutableSet<String> = mutableSetOf()
     private var selectedMediaTypes: MutableSet<String> = mutableSetOf()
 
@@ -37,12 +38,14 @@ class MovieTable(private val container: Element) {
     // Filter options (loaded from API)
     private var allGenres: List<String> = emptyList()
     private var allSubgenres: List<String> = emptyList()
+    private var allCollections: List<String> = emptyList()
     private var allCountries: List<String> = emptyList()
     private val allMediaTypes = listOf("VHS", "DVD", "Blu-ray", "4K", "Digital")
 
     // Dropdown open states
     private var genreDropdownOpen = false
     private var subgenreDropdownOpen = false
+    private var collectionDropdownOpen = false
     private var countryDropdownOpen = false
     private var mediaTypeDropdownOpen = false
     private var editToolsDropdownOpen = false
@@ -51,6 +54,7 @@ class MovieTable(private val container: Element) {
     // Dropdown search text
     private var genreSearchText = ""
     private var subgenreSearchText = ""
+    private var collectionSearchText = ""
     private var countrySearchText = ""
     private var mediaTypeSearchText = ""
 
@@ -244,6 +248,36 @@ class MovieTable(private val container: Element) {
                                     }
                                     span { +"Manage Genres" }
                                 }
+
+                                // Collections option
+                                a {
+                                    style = """
+                                        display: flex;
+                                        align-items: center;
+                                        gap: 10px;
+                                        padding: 12px 16px;
+                                        font-size: 14px;
+                                        font-weight: 500;
+                                        cursor: pointer;
+                                        color: #e0e0e0;
+                                        text-decoration: none;
+                                        transition: all 0.2s;
+                                        border-bottom: 1px solid rgba(255,255,255,0.1);
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
+                                    onClickFunction = { e ->
+                                        e.preventDefault()
+                                        editToolsDropdownOpen = false
+                                        updateEditToolsDropdown()
+                                        showCollectionManagement()
+                                    }
+                                    span {
+                                        classes = setOf("mdi", "mdi-bookmark-multiple")
+                                        style = "font-size: 18px;"
+                                    }
+                                    span { +"Manage Collections" }
+                                }
                                 
                                 // Add Movie option
                                 a {
@@ -336,6 +370,7 @@ class MovieTable(private val container: Element) {
         try {
             allGenres = fetchGenreOptions()
             allSubgenres = fetchSubgenreOptions()
+            allCollections = fetchCollectionOptions()
             allCountries = fetchAllCountries()
         } catch (e: Exception) {
             console.error("Failed to load filter options:", e)
@@ -582,6 +617,8 @@ class MovieTable(private val container: Element) {
                             if (!genreDropdownOpen) genreSearchText = ""
                             subgenreDropdownOpen = false
                             subgenreSearchText = ""
+                            collectionDropdownOpen = false
+                            collectionSearchText = ""
                             countryDropdownOpen = false
                             countrySearchText = ""
                             mediaTypeDropdownOpen = false
@@ -629,6 +666,8 @@ class MovieTable(private val container: Element) {
                             if (!subgenreDropdownOpen) subgenreSearchText = ""
                             genreDropdownOpen = false
                             genreSearchText = ""
+                            collectionDropdownOpen = false
+                            collectionSearchText = ""
                             countryDropdownOpen = false
                             countrySearchText = ""
                             mediaTypeDropdownOpen = false
@@ -662,6 +701,55 @@ class MovieTable(private val container: Element) {
                         }
                     )
 
+                    // Collection multi-select dropdown
+                    renderMultiSelectDropdown(
+                        id = "collection",
+                        label = "Collections",
+                        iconClass = "mdi-bookmark-multiple-outline",
+                        options = allCollections,
+                        selectedOptions = selectedCollections,
+                        isOpen = collectionDropdownOpen,
+                        searchText = collectionSearchText,
+                        onToggle = {
+                            collectionDropdownOpen = !collectionDropdownOpen
+                            if (!collectionDropdownOpen) collectionSearchText = ""
+                            genreDropdownOpen = false
+                            genreSearchText = ""
+                            subgenreDropdownOpen = false
+                            subgenreSearchText = ""
+                            countryDropdownOpen = false
+                            countrySearchText = ""
+                            mediaTypeDropdownOpen = false
+                            mediaTypeSearchText = ""
+                            renderFilters()
+                        },
+                        onOptionToggle = { option ->
+                            if (selectedCollections.contains(option)) {
+                                selectedCollections.remove(option)
+                            } else {
+                                selectedCollections.add(option)
+                            }
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onClear = {
+                            selectedCollections.clear()
+                            currentPage = 1
+                            renderFilters()
+                            mainScope.launch { loadMovies() }
+                        },
+                        onSearchChange = { newText ->
+                            collectionSearchText = newText
+                            renderFilters()
+                            // Refocus the search input after re-render
+                            (document.getElementById("collection-search") as? HTMLInputElement)?.let { input ->
+                                input.focus()
+                                input.setSelectionRange(newText.length, newText.length)
+                            }
+                        }
+                    )
+
                     // Country multi-select dropdown
                     renderMultiSelectDropdown(
                         id = "country",
@@ -678,6 +766,8 @@ class MovieTable(private val container: Element) {
                             genreSearchText = ""
                             subgenreDropdownOpen = false
                             subgenreSearchText = ""
+                            collectionDropdownOpen = false
+                            collectionSearchText = ""
                             mediaTypeDropdownOpen = false
                             mediaTypeSearchText = ""
                             renderFilters()
@@ -725,6 +815,8 @@ class MovieTable(private val container: Element) {
                             genreSearchText = ""
                             subgenreDropdownOpen = false
                             subgenreSearchText = ""
+                            collectionDropdownOpen = false
+                            collectionSearchText = ""
                             countryDropdownOpen = false
                             countrySearchText = ""
                             renderFilters()
@@ -759,7 +851,8 @@ class MovieTable(private val container: Element) {
 
                 // Row 3: Active filters display and reset button
                 val hasActiveFilters = searchText.isNotBlank() || selectedGenres.isNotEmpty() || 
-                    selectedSubgenres.isNotEmpty() || selectedCountries.isNotEmpty() || selectedMediaTypes.isNotEmpty()
+                    selectedSubgenres.isNotEmpty() || selectedCollections.isNotEmpty() ||
+                    selectedCountries.isNotEmpty() || selectedMediaTypes.isNotEmpty()
 
                 if (hasActiveFilters) {
                     div {
@@ -791,6 +884,16 @@ class MovieTable(private val container: Element) {
                         selectedSubgenres.forEach { subgenre ->
                             renderFilterTag(subgenre, "#e3f2fd", "#0d47a1") {
                                 selectedSubgenres.remove(subgenre)
+                                currentPage = 1
+                                renderFilters()
+                                mainScope.launch { loadMovies() }
+                            }
+                        }
+
+                        // Show selected collection tags
+                        selectedCollections.forEach { collection ->
+                            renderFilterTag(collection, "#fff0f6", "#b5179e") {
+                                selectedCollections.remove(collection)
                                 currentPage = 1
                                 renderFilters()
                                 mainScope.launch { loadMovies() }
@@ -876,13 +979,15 @@ class MovieTable(private val container: Element) {
             val target = event.target as? Element
             if (target != null) {
                 val isInsideDropdown = target.closest(".multi-select-dropdown") != null
-                if (!isInsideDropdown && (genreDropdownOpen || subgenreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
+                if (!isInsideDropdown && (genreDropdownOpen || subgenreDropdownOpen || collectionDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
                     genreDropdownOpen = false
                     subgenreDropdownOpen = false
+                    collectionDropdownOpen = false
                     countryDropdownOpen = false
                     mediaTypeDropdownOpen = false
                     genreSearchText = ""
                     subgenreSearchText = ""
+                    collectionSearchText = ""
                     countrySearchText = ""
                     mediaTypeSearchText = ""
                     renderFilters()
@@ -1172,6 +1277,13 @@ class MovieTable(private val container: Element) {
             }
         }
 
+        // Filter by collections (movie must have ALL selected collections)
+        if (selectedCollections.isNotEmpty()) {
+            filtered = filtered.filter { movie ->
+                selectedCollections.all { collection -> movie.collections.contains(collection) }
+            }
+        }
+
         // Filter by countries (movie must have ANY of the selected countries)
         if (selectedCountries.isNotEmpty()) {
             filtered = filtered.filter { movie ->
@@ -1206,6 +1318,7 @@ class MovieTable(private val container: Element) {
         searchText = ""
         selectedGenres.clear()
         selectedSubgenres.clear()
+        selectedCollections.clear()
         selectedCountries.clear()
         selectedMediaTypes.clear()
         sortField = SortField.TITLE
@@ -1215,10 +1328,12 @@ class MovieTable(private val container: Element) {
         // Close all dropdowns and clear search text
         genreDropdownOpen = false
         subgenreDropdownOpen = false
+        collectionDropdownOpen = false
         countryDropdownOpen = false
         mediaTypeDropdownOpen = false
         genreSearchText = ""
         subgenreSearchText = ""
+        collectionSearchText = ""
         countrySearchText = ""
         mediaTypeSearchText = ""
 
@@ -1248,6 +1363,7 @@ class MovieTable(private val container: Element) {
             // Check if we need client-side filtering (only when multiple items selected for any filter)
             val needsClientSideFiltering = selectedGenres.size > 1 || 
                 selectedSubgenres.size > 1 ||
+                selectedCollections.size > 1 ||
                 selectedCountries.size > 1 || 
                 selectedMediaTypes.size > 1
 
@@ -1261,6 +1377,7 @@ class MovieTable(private val container: Element) {
                     search = null,
                     genre = null,
                     subgenre = null,
+                    collection = null,
                     country = null,
                     mediaType = null,
                     sortField = sortFieldStr,
@@ -1278,6 +1395,7 @@ class MovieTable(private val container: Element) {
                     search = searchText.takeIf { it.isNotBlank() },
                     genre = selectedGenres.firstOrNull(),
                     subgenre = selectedSubgenres.firstOrNull(),
+                    collection = selectedCollections.firstOrNull(),
                     country = selectedCountries.firstOrNull(),
                     mediaType = selectedMediaTypes.firstOrNull(),
                     sortField = sortFieldStr,
@@ -1466,6 +1584,29 @@ class MovieTable(private val container: Element) {
                                             span {
                                                 style = "display: inline-block; padding: 4px 10px; background-color: #f1f3f4; color: #5f6368; border-radius: 16px; font-size: 11px; font-weight: 500;"
                                                 +"+${movie.genres.size - 4}"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Collections
+                                if (movie.collections.isNotEmpty()) {
+                                    div {
+                                        style = "display: flex; flex-wrap: wrap; gap: 6px;"
+                                        movie.collections.take(3).forEach { collection ->
+                                            span {
+                                                style = "display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; background-color: #fff0f6; color: #b5179e; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                                span {
+                                                    classes = setOf("mdi", "mdi-bookmark-multiple-outline")
+                                                    style = "font-size: 13px;"
+                                                }
+                                                +collection
+                                            }
+                                        }
+                                        if (movie.collections.size > 3) {
+                                            span {
+                                                style = "display: inline-block; padding: 4px 10px; background-color: #f1f3f4; color: #5f6368; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                                +"+${movie.collections.size - 3}"
                                             }
                                         }
                                     }
@@ -1834,6 +1975,18 @@ class MovieTable(private val container: Element) {
             }
         }
         genreManagementUI.show()
+    }
+
+    private fun showCollectionManagement() {
+        val collectionManagementUI = CollectionManagementUI(container) {
+            // On close, refresh filter options and data
+            mainScope.launch {
+                loadFilterOptions()
+                renderFilters()
+                loadMovies()
+            }
+        }
+        collectionManagementUI.show()
     }
 
     private fun showRandomPicker() {

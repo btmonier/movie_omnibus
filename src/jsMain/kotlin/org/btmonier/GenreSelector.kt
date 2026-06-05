@@ -20,7 +20,7 @@ class GenreSelector(
     private val onItemsChanged: (List<String>) -> Unit
 ) {
     enum class SelectorType {
-        GENRE, SUBGENRE
+        GENRE, SUBGENRE, COLLECTION
     }
 
     private var allItems: List<GenreResponse> = emptyList()
@@ -33,6 +33,7 @@ class GenreSelector(
         allItems = when (type) {
             SelectorType.GENRE -> fetchAllGenres().map { GenreResponse(it.id, it.name) }
             SelectorType.SUBGENRE -> fetchAllSubgenres().map { GenreResponse(it.id, it.name) }
+            SelectorType.COLLECTION -> fetchAllCollections().map { GenreResponse(it.id, it.name) }
         }
         filteredItems = allItems
 
@@ -221,6 +222,7 @@ class GenreSelector(
                 val newItem = when (type) {
                     SelectorType.GENRE -> createGenre(name).let { GenreResponse(it.id, it.name) }
                     SelectorType.SUBGENRE -> createSubgenre(name).let { GenreResponse(it.id, it.name) }
+                    SelectorType.COLLECTION -> createCollection(name).let { GenreResponse(it.id, it.name) }
                 }
 
                 // Add to our local list

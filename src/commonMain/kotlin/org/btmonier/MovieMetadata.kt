@@ -61,6 +61,7 @@ data class MovieMetadata(
     val alternateTitles: List<String> = emptyList(),  // Alternate titles from different regions
     val genres: List<String> = emptyList(),
     val subgenres: List<String> = emptyList(),  // More specific genre classifications
+    val collections: List<String> = emptyList(),  // Groupings like franchises or thematic/vibe collections
     val themes: List<String> = emptyList(),
     val country: List<String> = emptyList(),
     val cast: List<String> = emptyList(),

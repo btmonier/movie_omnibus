@@ -18,17 +18,20 @@ class RandomMoviePicker(
     // Multi-select filter state
     private var selectedGenres: MutableSet<String> = mutableSetOf()
     private var selectedSubgenres: MutableSet<String> = mutableSetOf()
+    private var selectedCollections: MutableSet<String> = mutableSetOf()
     private var selectedCountries: MutableSet<String> = mutableSetOf()
     private var selectedMediaTypes: MutableSet<String> = mutableSetOf()
     
     private var genres: List<String> = emptyList()
     private var subgenres: List<String> = emptyList()
+    private var collections: List<String> = emptyList()
     private var countries: List<String> = emptyList()
     private var mediaTypes: List<String> = emptyList()
     
     // Dropdown open states
     private var genreDropdownOpen = false
     private var subgenreDropdownOpen = false
+    private var collectionDropdownOpen = false
     private var countryDropdownOpen = false
     private var mediaTypeDropdownOpen = false
     
@@ -45,6 +48,7 @@ class RandomMoviePicker(
             try {
                 genres = fetchGenreOptions()
                 subgenres = fetchSubgenreOptions()
+                collections = fetchCollectionOptions()
                 countries = fetchAllCountries()
                 mediaTypes = fetchAllMediaTypes()
                 updateCount()
@@ -191,6 +195,7 @@ class RandomMoviePicker(
                             onToggle = {
                                 genreDropdownOpen = !genreDropdownOpen
                                 subgenreDropdownOpen = false
+                                collectionDropdownOpen = false
                                 countryDropdownOpen = false
                                 mediaTypeDropdownOpen = false
                                 renderFiltersSection()
@@ -227,6 +232,7 @@ class RandomMoviePicker(
                             onToggle = {
                                 subgenreDropdownOpen = !subgenreDropdownOpen
                                 genreDropdownOpen = false
+                                collectionDropdownOpen = false
                                 countryDropdownOpen = false
                                 mediaTypeDropdownOpen = false
                                 renderFiltersSection()
@@ -252,6 +258,43 @@ class RandomMoviePicker(
                                 }
                             }
                         )
+
+                        // Collection filter
+                        renderMultiSelectDropdown(
+                            label = "Collection",
+                            iconClass = "mdi-bookmark-multiple-outline",
+                            options = collections,
+                            selectedOptions = selectedCollections,
+                            isOpen = collectionDropdownOpen,
+                            onToggle = {
+                                collectionDropdownOpen = !collectionDropdownOpen
+                                genreDropdownOpen = false
+                                subgenreDropdownOpen = false
+                                countryDropdownOpen = false
+                                mediaTypeDropdownOpen = false
+                                renderFiltersSection()
+                            },
+                            onOptionToggle = { value ->
+                                if (value in selectedCollections) {
+                                    selectedCollections.remove(value)
+                                } else {
+                                    selectedCollections.add(value)
+                                }
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            },
+                            onClear = {
+                                selectedCollections.clear()
+                                renderFiltersSection()
+                                mainScope.launch {
+                                    updateCount()
+                                    updateCountDisplay()
+                                }
+                            }
+                        )
                         
                         // Country filter
                         renderMultiSelectDropdown(
@@ -264,6 +307,7 @@ class RandomMoviePicker(
                                 countryDropdownOpen = !countryDropdownOpen
                                 genreDropdownOpen = false
                                 subgenreDropdownOpen = false
+                                collectionDropdownOpen = false
                                 mediaTypeDropdownOpen = false
                                 renderFiltersSection()
                             },
@@ -300,6 +344,7 @@ class RandomMoviePicker(
                                 mediaTypeDropdownOpen = !mediaTypeDropdownOpen
                                 genreDropdownOpen = false
                                 subgenreDropdownOpen = false
+                                collectionDropdownOpen = false
                                 countryDropdownOpen = false
                                 renderFiltersSection()
                             },
@@ -657,6 +702,19 @@ class RandomMoviePicker(
                         }
                     }
 
+                    // Collections
+                    if (movie.collections.isNotEmpty()) {
+                        div {
+                            style = "margin-bottom: 12px;"
+                            movie.collections.forEach { collection ->
+                                span {
+                                    style = "display: inline-block; padding: 4px 12px; margin: 2px 4px; background-color: #fff0f6; color: #b5179e; border-radius: 16px; font-size: 12px; font-weight: 500;"
+                                    +collection
+                                }
+                            }
+                        }
+                    }
+
                     // Countries
                     if (movie.country.isNotEmpty()) {
                         div {
@@ -995,9 +1053,10 @@ class RandomMoviePicker(
         document.addEventListener("click", { event ->
             val target = event.target as? Element
             val clickedDropdown = target?.closest(".filter-dropdown")
-            if (clickedDropdown == null && (genreDropdownOpen || subgenreDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
+            if (clickedDropdown == null && (genreDropdownOpen || subgenreDropdownOpen || collectionDropdownOpen || countryDropdownOpen || mediaTypeDropdownOpen)) {
                 genreDropdownOpen = false
                 subgenreDropdownOpen = false
+                collectionDropdownOpen = false
                 countryDropdownOpen = false
                 mediaTypeDropdownOpen = false
                 renderFiltersSection()
@@ -1022,6 +1081,7 @@ class RandomMoviePicker(
                     onToggle = {
                         genreDropdownOpen = !genreDropdownOpen
                         subgenreDropdownOpen = false
+                        collectionDropdownOpen = false
                         countryDropdownOpen = false
                         mediaTypeDropdownOpen = false
                         renderFiltersSection()
@@ -1058,6 +1118,7 @@ class RandomMoviePicker(
                     onToggle = {
                         subgenreDropdownOpen = !subgenreDropdownOpen
                         genreDropdownOpen = false
+                        collectionDropdownOpen = false
                         countryDropdownOpen = false
                         mediaTypeDropdownOpen = false
                         renderFiltersSection()
@@ -1083,6 +1144,43 @@ class RandomMoviePicker(
                         }
                     }
                 )
+
+                // Collection filter
+                renderMultiSelectDropdown(
+                    label = "Collection",
+                    iconClass = "mdi-bookmark-multiple-outline",
+                    options = collections,
+                    selectedOptions = selectedCollections,
+                    isOpen = collectionDropdownOpen,
+                    onToggle = {
+                        collectionDropdownOpen = !collectionDropdownOpen
+                        genreDropdownOpen = false
+                        subgenreDropdownOpen = false
+                        countryDropdownOpen = false
+                        mediaTypeDropdownOpen = false
+                        renderFiltersSection()
+                    },
+                    onOptionToggle = { value ->
+                        if (value in selectedCollections) {
+                            selectedCollections.remove(value)
+                        } else {
+                            selectedCollections.add(value)
+                        }
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    },
+                    onClear = {
+                        selectedCollections.clear()
+                        renderFiltersSection()
+                        mainScope.launch {
+                            updateCount()
+                            updateCountDisplay()
+                        }
+                    }
+                )
                 
                 // Country filter
                 renderMultiSelectDropdown(
@@ -1095,6 +1193,7 @@ class RandomMoviePicker(
                         countryDropdownOpen = !countryDropdownOpen
                         genreDropdownOpen = false
                         subgenreDropdownOpen = false
+                        collectionDropdownOpen = false
                         mediaTypeDropdownOpen = false
                         renderFiltersSection()
                     },
@@ -1131,6 +1230,7 @@ class RandomMoviePicker(
                         mediaTypeDropdownOpen = !mediaTypeDropdownOpen
                         genreDropdownOpen = false
                         subgenreDropdownOpen = false
+                        collectionDropdownOpen = false
                         countryDropdownOpen = false
                         renderFiltersSection()
                     },
@@ -1163,6 +1263,7 @@ class RandomMoviePicker(
         availableCount = fetchUnwatchedMovieCount(
             genres = selectedGenres,
             subgenres = selectedSubgenres,
+            collections = selectedCollections,
             countries = selectedCountries,
             mediaTypes = selectedMediaTypes
         )
@@ -1176,12 +1277,14 @@ class RandomMoviePicker(
     private fun clearFilters() {
         selectedGenres.clear()
         selectedSubgenres.clear()
+        selectedCollections.clear()
         selectedCountries.clear()
         selectedMediaTypes.clear()
 
         // Close all dropdowns
         genreDropdownOpen = false
         subgenreDropdownOpen = false
+        collectionDropdownOpen = false
         countryDropdownOpen = false
         mediaTypeDropdownOpen = false
 
@@ -1212,6 +1315,7 @@ class RandomMoviePicker(
                 val movie = fetchRandomUnwatchedMovie(
                     genres = selectedGenres,
                     subgenres = selectedSubgenres,
+                    collections = selectedCollections,
                     countries = selectedCountries,
                     mediaTypes = selectedMediaTypes
                 )

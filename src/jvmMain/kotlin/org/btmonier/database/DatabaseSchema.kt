@@ -40,6 +40,16 @@ object Subgenres : IntIdTable("subgenres") {
 }
 
 /**
+ * Global collections table - master list of all available collections
+ * (e.g. franchises, or thematic/vibe groupings). Each collection can carry
+ * an optional description.
+ */
+object Collections : IntIdTable("collections") {
+    val name = varchar("name", 200).uniqueIndex()
+    val description = text("description").nullable()
+}
+
+/**
  * Global distributors table - master list of all physical media distributors
  */
 object Distributors : IntIdTable("distributors") {
@@ -62,6 +72,15 @@ object MovieGenres : IntIdTable("movie_genres") {
 object MovieSubgenres : IntIdTable("movie_subgenres") {
     val movieId = reference("movie_id", Movies)
     val subgenreId = reference("subgenre_id", Subgenres)
+}
+
+/**
+ * Table for movie collections (many-to-many relationship)
+ * Links movies to collections from the global Collections table
+ */
+object MovieCollections : IntIdTable("movie_collections") {
+    val movieId = reference("movie_id", Movies)
+    val collectionId = reference("collection_id", Collections)
 }
 
 /**
