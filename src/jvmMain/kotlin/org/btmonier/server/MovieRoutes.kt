@@ -63,16 +63,17 @@ fun Route.movieRoutes(dao: MovieDao) {
                     return@post
                 }
 
-                if (!url.startsWith("https://letterboxd.com/film/")) {
+                if (!ScraperUtils.isLetterboxdFilmUrl(url)) {
                     call.respond(HttpStatusCode.BadRequest, ScrapeResponse(
                         success = false,
-                        error = "URL must be a valid Letterboxd film URL (e.g., https://letterboxd.com/film/movie-name/)"
+                        error = "URL must be a valid Letterboxd film URL (e.g., https://letterboxd.com/film/movie-name/) or a shortened boxd.it URL (e.g., https://boxd.it/2aNK)"
                     ))
                     return@post
                 }
 
-                // Check if movie already exists (by normalized URL, so variants are caught)
-                val existingMovie = dao.getMovieByUrl(ScraperUtils.normalizeLetterboxdUrl(url))
+                // Check if movie already exists under the URL as entered (normalized,
+                // with and without a trailing slash)
+                val existingMovie = dao.getMovieByAnyUrl(ScraperUtils.letterboxdUrlVariants(url))
                 if (existingMovie != null) {
                     call.respond(HttpStatusCode.OK, ScrapeResponse(
                         success = false,
@@ -85,12 +86,35 @@ fun Route.movieRoutes(dao: MovieDao) {
 
                 // Scrape the movie data from Letterboxd
                 try {
+                    // Jsoup follows redirects, so boxd.it short URLs resolve to the film page
                     val doc = Jsoup.connect(url)
                         .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
                         .timeout(15000)
                         .get()
 
-                    val scrapedMetadata = ScraperUtils.extractMetadataWithTitle(doc, url)
+                    // The page exposes both URL forms: the canonical letterboxd.com URL
+                    // and the shortened boxd.it share URL. Check both against the
+                    // database so a movie stored under either form is caught.
+                    val canonicalUrl = ScraperUtils.extractCanonicalUrl(doc) ?: url
+                    val shortUrl = ScraperUtils.extractShortUrl(doc)
+                    val urlCandidates = ScraperUtils.letterboxdUrlVariants(canonicalUrl) +
+                        (shortUrl?.let { ScraperUtils.letterboxdUrlVariants(it) } ?: emptySet())
+
+                    val existingByEitherForm = dao.getMovieByAnyUrl(urlCandidates)
+                    if (existingByEitherForm != null) {
+                        call.respond(HttpStatusCode.OK, ScrapeResponse(
+                            success = false,
+                            exists = true,
+                            existingMovieId = existingByEitherForm.id,
+                            error = "Movie \"${existingByEitherForm.title}\" already exists in your collection"
+                        ))
+                        return@post
+                    }
+
+                    val scrapedMetadata = ScraperUtils.extractMetadataWithTitle(
+                        doc,
+                        ScraperUtils.normalizeLetterboxdUrl(canonicalUrl)
+                    )
 
                     call.respond(HttpStatusCode.OK, ScrapeResponse(
                         success = true,
@@ -288,8 +312,9 @@ fun Route.movieRoutes(dao: MovieDao) {
                 // http/https, www, query params) are treated as the same movie.
                 val normalizedUrl = ScraperUtils.normalizeLetterboxdUrl(movie.url)
 
-                // Check if movie already exists (by normalized URL)
-                val existingMovie = dao.getMovieByUrl(normalizedUrl)
+                // Check if movie already exists (by normalized URL, with and
+                // without a trailing slash so shortened boxd.it links match too)
+                val existingMovie = dao.getMovieByAnyUrl(ScraperUtils.letterboxdUrlVariants(movie.url))
                 if (existingMovie != null) {
                     call.respond(HttpStatusCode.Conflict, mapOf(
                         "error" to "Movie \"${existingMovie.title}\" already exists in your collection"

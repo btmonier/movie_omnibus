@@ -196,6 +196,19 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     /**
+     * Get a movie matching any of the given URL spellings (e.g. shortened boxd.it
+     * links and full letterboxd.com URLs for the same film).
+     */
+    suspend fun getMovieByAnyUrl(urls: Collection<String>): MovieMetadata? {
+        if (urls.isEmpty()) return null
+        return DatabaseFactory.dbQuery {
+            Movies.selectAll().where { Movies.url inList urls }
+                .map { rowToMovieMetadata(it) }
+                .firstOrNull()
+        }
+    }
+
+    /**
      * Get a movie ID by its URL.
      */
     suspend fun getMovieIdByUrl(url: String): Int? = DatabaseFactory.dbQuery {

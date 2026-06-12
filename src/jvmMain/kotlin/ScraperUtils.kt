@@ -47,6 +47,59 @@ object ScraperUtils {
     }
 
     /**
+     * Returns true if the URL points to a Letterboxd film page, either as a full
+     * `letterboxd.com/film/...` URL or as a shortened `boxd.it/...` URL.
+     */
+    fun isLetterboxdFilmUrl(url: String): Boolean {
+        val normalized = normalizeLetterboxdUrl(url)
+        return normalized.startsWith("https://letterboxd.com/film/") ||
+            normalized.startsWith("https://boxd.it/")
+    }
+
+    /**
+     * Builds the set of URL spellings that should be treated as the same movie when
+     * checking for duplicates: the URL as given, its normalized form, and the
+     * normalized form without a trailing slash (shortened boxd.it links are commonly
+     * stored without one).
+     */
+    fun letterboxdUrlVariants(url: String): Set<String> {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return emptySet()
+        val normalized = normalizeLetterboxdUrl(trimmed)
+        return setOf(trimmed, normalized, normalized.trimEnd('/'))
+    }
+
+    /**
+     * Extracts the shortened boxd.it share URL from a Letterboxd movie page.
+     * Letterboxd embeds it in the share widget's URL input field.
+     *
+     * @param doc The JSoup document of a Letterboxd movie page
+     * @return The boxd.it short URL, or null if not found
+     */
+    fun extractShortUrl(doc: Document): String? {
+        doc.select("input[value^=https://boxd.it/]").attr("value")
+            .trim().takeIf { it.isNotBlank() }?.let { return it }
+
+        return doc.select("a[href^=https://boxd.it/]").attr("href")
+            .trim().takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Extracts the canonical full letterboxd.com URL from a movie page, falling back
+     * to the document's final location (useful when the page was reached via a
+     * boxd.it redirect).
+     *
+     * @param doc The JSoup document of a Letterboxd movie page
+     * @return The canonical film URL, or null if it cannot be determined
+     */
+    fun extractCanonicalUrl(doc: Document): String? {
+        doc.select("meta[property=og:url]").attr("content")
+            .trim().takeIf { it.isNotBlank() }?.let { return it }
+
+        return doc.location().trim().takeIf { it.isNotBlank() }
+    }
+
+    /**
      * Scrapes elements with class "text-slug" that have href attributes containing the given pattern.
      *
      * @param doc The JSoup document to scrape

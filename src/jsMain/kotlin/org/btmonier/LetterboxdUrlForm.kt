@@ -73,7 +73,7 @@ class LetterboxdUrlForm(
 
                     p {
                         style = "color: #5f6368; font-size: 14px; margin-bottom: 20px;"
-                        +"Enter a Letterboxd URL to automatically fetch movie details."
+                        +"Enter a Letterboxd URL (full or shortened boxd.it link) to automatically fetch movie details."
                     }
 
                     // URL input field
@@ -108,7 +108,7 @@ class LetterboxdUrlForm(
                     // Example URL hint
                     p {
                         style = "color: #80868b; font-size: 12px; margin-top: -12px; margin-bottom: 24px;"
-                        +"Example: https://letterboxd.com/film/the-godfather/"
+                        +"Examples: https://letterboxd.com/film/the-godfather/ or https://boxd.it/2aNK"
                     }
 
                     // Loading indicator (hidden by default)
@@ -232,10 +232,11 @@ class LetterboxdUrlForm(
             return
         }
 
-        if (!url.startsWith("https://letterboxd.com/film/")) {
+        val validUrlPattern = Regex("""^https?://(www\.)?(letterboxd\.com/film/|boxd\.it/)\S+""", RegexOption.IGNORE_CASE)
+        if (!validUrlPattern.containsMatchIn(url)) {
             alertDialog.show(
                 title = "Invalid URL",
-                message = "Please enter a valid Letterboxd film URL.\n\nExample: https://letterboxd.com/film/the-godfather/"
+                message = "Please enter a valid Letterboxd film URL or shortened boxd.it URL.\n\nExamples:\nhttps://letterboxd.com/film/the-godfather/\nhttps://boxd.it/2aNK"
             )
             return
         }

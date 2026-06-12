@@ -8,6 +8,67 @@ import kotlin.test.assertTrue
 class ScraperUtilsTest {
 
     @Test
+    fun `isLetterboxdFilmUrl accepts full and shortened URLs`() {
+        assertTrue(ScraperUtils.isLetterboxdFilmUrl("https://letterboxd.com/film/the-godfather/"))
+        assertTrue(ScraperUtils.isLetterboxdFilmUrl("http://www.letterboxd.com/film/the-godfather"))
+        assertTrue(ScraperUtils.isLetterboxdFilmUrl("https://boxd.it/2aNK"))
+        assertTrue(ScraperUtils.isLetterboxdFilmUrl("http://boxd.it/2aNK/"))
+        assertTrue(!ScraperUtils.isLetterboxdFilmUrl("https://example.com/film/the-godfather/"))
+        assertTrue(!ScraperUtils.isLetterboxdFilmUrl("https://letterboxd.com/list/some-list/"))
+    }
+
+    @Test
+    fun `letterboxdUrlVariants includes trailing slash variants`() {
+        val variants = ScraperUtils.letterboxdUrlVariants("https://boxd.it/2aNK")
+
+        assertTrue(variants.contains("https://boxd.it/2aNK"))
+        assertTrue(variants.contains("https://boxd.it/2aNK/"))
+    }
+
+    @Test
+    fun `letterboxdUrlVariants normalizes full URLs`() {
+        val variants = ScraperUtils.letterboxdUrlVariants("http://www.letterboxd.com/film/the-godfather")
+
+        assertTrue(variants.contains("https://letterboxd.com/film/the-godfather/"))
+        assertTrue(variants.contains("https://letterboxd.com/film/the-godfather"))
+    }
+
+    @Test
+    fun `extractShortUrl finds boxd it URL in share widget`() {
+        val html = """
+            <html>
+                <body>
+                    <div class="urlgroup">
+                        <input id="url-field-film-51818" type="text" value="https://boxd.it/2aNK" readonly>
+                    </div>
+                </body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+        assertEquals("https://boxd.it/2aNK", ScraperUtils.extractShortUrl(doc))
+    }
+
+    @Test
+    fun `extractShortUrl returns null when absent`() {
+        val doc = Jsoup.parse("<html><body><p>No share widget</p></body></html>")
+        assertEquals(null, ScraperUtils.extractShortUrl(doc))
+    }
+
+    @Test
+    fun `extractCanonicalUrl reads og url meta tag`() {
+        val html = """
+            <html>
+                <head><meta property="og:url" content="https://letterboxd.com/film/the-godfather/"></head>
+                <body></body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+        assertEquals("https://letterboxd.com/film/the-godfather/", ScraperUtils.extractCanonicalUrl(doc))
+    }
+
+    @Test
     fun `scrapeByHref extracts genres correctly`() {
         val html = """
             <html>
