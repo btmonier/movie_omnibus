@@ -608,11 +608,11 @@ class PhysicalMediaForm(
             return
         }
 
-        val validUrlPattern = Regex("""^https?://(www\.)?blu-ray\.com/movies/[^/]+/\d+/?""", RegexOption.IGNORE_CASE)
+        val validUrlPattern = Regex("""^https?://(www\.)?blu-ray\.com/(movies|dvd)/[^/]+/\d+/?""", RegexOption.IGNORE_CASE)
         if (!validUrlPattern.containsMatchIn(url)) {
             alertDialog.show(
                 title = "Invalid URL",
-                message = "Please enter a valid blu-ray.com release URL.\n\nExample:\nhttps://www.blu-ray.com/movies/Invaders-from-Mars-4K-Blu-ray/336476/"
+                message = "Please enter a valid blu-ray.com release URL.\n\nExamples:\nhttps://www.blu-ray.com/movies/Invaders-from-Mars-4K-Blu-ray/336476/\nhttps://www.blu-ray.com/dvd/1-Ichi-DVD/91279/"
             )
             return
         }
