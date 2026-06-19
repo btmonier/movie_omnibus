@@ -4,8 +4,11 @@ import kotlinx.browser.document
 import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
+import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
 import org.w3c.dom.Element
+import org.w3c.dom.HTMLButtonElement
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 
@@ -274,8 +277,64 @@ class PhysicalMediaForm(
             }
         }
 
-        // Bluray.com URL
-        inputField("Blu-ray.com URL", "physical-media-form-bluray-url", media?.blurayComUrl ?: "", "https://www.blu-ray.com/...", required = false)
+        // Bluray.com URL with inline "Fetch details" button
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                htmlFor = "physical-media-form-bluray-url"
+                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                +"Blu-ray.com URL"
+            }
+            div {
+                style = "display: flex; gap: 8px; align-items: stretch;"
+                input(type = InputType.text) {
+                    id = "physical-media-form-bluray-url"
+                    value = media?.blurayComUrl ?: ""
+                    placeholder = "https://www.blu-ray.com/..."
+                    style = """
+                        flex: 1;
+                        padding: 10px 12px;
+                        font-size: 14px;
+                        border: 1px solid #dadce0;
+                        border-radius: 4px;
+                        box-sizing: border-box;
+                        font-family: 'Roboto', arial, sans-serif;
+                    """.trimIndent()
+                    attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
+                    attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                }
+                button {
+                    id = "bluray-fetch-button"
+                    type = ButtonType.button
+                    style = """
+                        padding: 10px 16px;
+                        font-size: 14px;
+                        cursor: pointer;
+                        background-color: #1a73e8;
+                        color: white;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: 500;
+                        white-space: nowrap;
+                        transition: background-color 0.2s;
+                    """.trimIndent()
+                    attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'"
+                    attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'"
+                    +"Fetch details"
+                    onClickFunction = {
+                        handleFetchFromBluRay()
+                    }
+                }
+            }
+            div {
+                id = "bluray-fetch-status"
+                style = "display: none; margin-top: 6px; font-size: 12px;"
+            }
+            p {
+                style = "color: #80868b; font-size: 12px; margin-top: 6px; margin-bottom: 0;"
+                +"Paste a blu-ray.com release URL and click Fetch details to auto-fill the fields below."
+            }
+        }
 
         // Library Location
         div {
@@ -371,6 +430,29 @@ class PhysicalMediaForm(
         renderImages()
     }
 
+    /**
+     * Returns true when the image URL is hosted by blu-ray.com (cover art is
+     * served from images.static-bluray.com).
+     */
+    private fun isBluRayImageUrl(url: String): Boolean {
+        val u = url.trim().lowercase()
+        if (u.isEmpty()) return false
+        return u.contains("blu-ray.com") || u.contains("static-bluray.com")
+    }
+
+    /**
+     * Reads the current image URL/description inputs from the DOM back into
+     * [imageUrls] so a re-render does not lose unsaved edits.
+     */
+    private fun syncImagesFromDom() {
+        for (index in imageUrls.indices) {
+            val url = (document.getElementById("image-url-$index") as? HTMLInputElement)?.value
+                ?: imageUrls[index].first
+            val desc = (document.getElementById("image-desc-$index") as? HTMLInputElement)?.value
+            imageUrls[index] = url to desc?.takeIf { it.isNotBlank() }
+        }
+    }
+
     private fun renderImages() {
         val container = document.getElementById("images-container") ?: return
         container.innerHTML = ""
@@ -406,9 +488,29 @@ class PhysicalMediaForm(
                                 """.trimIndent()
                                 +"Remove"
                                 onClickFunction = {
+                                    syncImagesFromDom()
                                     imageUrls.removeAt(index)
                                     renderImages()
                                 }
+                            }
+                        }
+                    }
+
+                    // Preview thumbnail for blu-ray.com images
+                    if (url.isNotBlank() && isBluRayImageUrl(url)) {
+                        div {
+                            style = "margin-bottom: 8px;"
+                            img {
+                                src = url
+                                alt = description ?: "Image preview"
+                                style = """
+                                    max-width: 120px;
+                                    max-height: 160px;
+                                    border-radius: 4px;
+                                    border: 1px solid #dadce0;
+                                    background-color: #fff;
+                                """.trimIndent()
+                                attributes["onerror"] = "this.style.display='none'"
                             }
                         }
                     }
@@ -426,6 +528,11 @@ class PhysicalMediaForm(
                             box-sizing: border-box;
                             margin-bottom: 6px;
                         """.trimIndent()
+                        // Refresh the preview when the URL changes (fires on blur).
+                        onChangeFunction = {
+                            syncImagesFromDom()
+                            renderImages()
+                        }
                     }
 
                     input(type = InputType.text) {
@@ -482,6 +589,121 @@ class PhysicalMediaForm(
                 attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
                 attributes["onblur"] = "this.style.borderColor='#dadce0'"
             }
+        }
+    }
+
+    /**
+     * Scrape a blu-ray.com URL and prefill the form. Existing user-entered values
+     * are preserved; only empty fields are filled.
+     */
+    private fun handleFetchFromBluRay() {
+        val urlInput = document.getElementById("physical-media-form-bluray-url") as? HTMLInputElement
+        val url = urlInput?.value?.trim() ?: ""
+
+        if (url.isBlank()) {
+            alertDialog.show(
+                title = "Validation Error",
+                message = "Please enter a Blu-ray.com URL first."
+            )
+            return
+        }
+
+        val validUrlPattern = Regex("""^https?://(www\.)?blu-ray\.com/movies/[^/]+/\d+/?""", RegexOption.IGNORE_CASE)
+        if (!validUrlPattern.containsMatchIn(url)) {
+            alertDialog.show(
+                title = "Invalid URL",
+                message = "Please enter a valid blu-ray.com release URL.\n\nExample:\nhttps://www.blu-ray.com/movies/Invaders-from-Mars-4K-Blu-ray/336476/"
+            )
+            return
+        }
+
+        val fetchButton = document.getElementById("bluray-fetch-button") as? HTMLButtonElement
+        fetchButton?.disabled = true
+        setFetchStatus("Fetching details from Blu-ray.com...", "#5f6368")
+
+        mainScope.launch {
+            try {
+                val response = scrapeBluRayUrl(url)
+                if (response.success && response.physicalMedia != null) {
+                    applyScrapedData(response.physicalMedia)
+                    setFetchStatus("Details loaded. Review and edit before saving.", "#188038")
+                } else {
+                    setFetchStatus(null, null)
+                    alertDialog.show(
+                        title = "Fetch Failed",
+                        message = response.error ?: "Could not fetch details. Please try again or enter details manually."
+                    )
+                }
+            } catch (e: Exception) {
+                setFetchStatus(null, null)
+                alertDialog.show(
+                    title = "Error",
+                    message = "An error occurred while fetching: ${e.message}"
+                )
+            } finally {
+                fetchButton?.disabled = false
+            }
+        }
+    }
+
+    /**
+     * Fills empty form fields with scraped values, leaving any user-entered
+     * values untouched.
+     */
+    private fun applyScrapedData(scraped: PhysicalMedia) {
+        // Media types: only fill when the user has not selected any yet.
+        val checkboxes = document.querySelectorAll("input[name='media-type']")
+        var anyChecked = false
+        for (i in 0 until checkboxes.length) {
+            val checkbox = checkboxes.item(i) as? HTMLInputElement
+            if (checkbox?.checked == true) anyChecked = true
+        }
+        if (!anyChecked && scraped.mediaTypes.isNotEmpty()) {
+            val scrapedNames = scraped.mediaTypes.map { it.name }.toSet()
+            for (i in 0 until checkboxes.length) {
+                val checkbox = checkboxes.item(i) as? HTMLInputElement ?: continue
+                checkbox.checked = checkbox.value in scrapedNames
+            }
+        }
+
+        // Title
+        val titleInput = document.getElementById("physical-media-form-title") as? HTMLInputElement
+        if (titleInput != null && titleInput.value.isBlank() && !scraped.title.isNullOrBlank()) {
+            titleInput.value = scraped.title
+        }
+
+        // Release date
+        val releaseDateInput = document.getElementById("physical-media-form-release-date") as? HTMLInputElement
+        if (releaseDateInput != null && releaseDateInput.value.isBlank() && !scraped.releaseDate.isNullOrBlank()) {
+            releaseDateInput.value = scraped.releaseDate
+        }
+
+        // Distributor (DistributorSelector has no public setter, so set the field + form var)
+        if (selectedDistributor.isNullOrBlank() && !scraped.distributor.isNullOrBlank()) {
+            selectedDistributor = scraped.distributor
+            val distributorInput = document.getElementById("distributor-selector-container-input") as? HTMLInputElement
+            distributorInput?.value = scraped.distributor
+        }
+
+        // Images: only fill when no image URL has been entered yet.
+        val hasExistingImage = imageUrls.any { it.first.isNotBlank() }
+        if (!hasExistingImage && scraped.images.isNotEmpty()) {
+            imageUrls.clear()
+            imageUrls.addAll(scraped.images.map { it.imageUrl to it.description })
+            if (imageUrls.isEmpty()) imageUrls.add("" to null)
+            renderImages()
+        }
+    }
+
+    private fun setFetchStatus(message: String?, color: String?) {
+        val status = document.getElementById("bluray-fetch-status") as? HTMLElement ?: return
+        if (message == null) {
+            status.style.display = "none"
+            status.textContent = ""
+        } else {
+            status.style.display = "block"
+            status.style.color = color ?: "#5f6368"
+            status.textContent = message
         }
     }
 

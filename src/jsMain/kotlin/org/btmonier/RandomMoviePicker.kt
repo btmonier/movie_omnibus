@@ -854,7 +854,8 @@ class RandomMoviePicker(
                                 }
 
                                 // Images
-                                if (media.images.isNotEmpty()) {
+                                val allImages = media.displayImages()
+                                if (allImages.isNotEmpty()) {
                                     div {
                                         style = "margin-top: 16px;"
                                         
@@ -864,15 +865,14 @@ class RandomMoviePicker(
                                                 classes = setOf("mdi", "mdi-camera")
                                                 style = "font-size: 16px;"
                                             }
-                                            +"Images (${media.images.size})"
+                                            +"Images (${allImages.size})"
                                         }
 
                                         div {
                                             style = "display: flex; flex-wrap: wrap; gap: 12px;"
-                                            media.images.forEachIndexed { imageIndex, image ->
+                                            allImages.forEachIndexed { imageIndex, image ->
                                                 div {
                                                     style = "position: relative;"
-                                                    val allImages = media.images
                                                     img {
                                                         src = image.imageUrl
                                                         alt = image.description ?: "Physical media image"

@@ -42,6 +42,40 @@ data class PhysicalMedia(
 )
 
 /**
+ * Derives the blu-ray.com front cover image URL from a release URL.
+ *
+ * blu-ray.com release URLs embed the numeric release id, and the cover art is
+ * served from a format-specific directory:
+ * - Blu-ray/4K releases live under `/movies/` and their covers are served from
+ *   `images.static-bluray.com/movies/covers/<id>_large.jpg`
+ *   (e.g. `https://www.blu-ray.com/movies/Some-Title/337326/`).
+ * - DVD releases live under `/dvd/` and their covers are served from
+ *   `images.static-bluray.com/movies/dvdcovers/<id>_large.jpg`
+ *   (e.g. `https://www.blu-ray.com/dvd/1-Ichi-DVD/91279/`).
+ *
+ * Returns null when the URL is not a recognizable blu-ray.com release URL.
+ */
+fun bluRayCoverImageUrl(blurayComUrl: String?): String? {
+    if (blurayComUrl.isNullOrBlank()) return null
+    val match = Regex("""blu-ray\.com/(movies|dvd)/[^/]+/(\d+)""", RegexOption.IGNORE_CASE)
+        .find(blurayComUrl) ?: return null
+    val coverDir = if (match.groupValues[1].equals("dvd", ignoreCase = true)) "dvdcovers" else "covers"
+    val id = match.groupValues[2]
+    return "https://images.static-bluray.com/movies/${coverDir}/${id}_large.jpg"
+}
+
+/**
+ * Returns the images to display for a physical media entry: the stored images,
+ * or — when none are stored but a blu-ray.com URL is present — the derived
+ * blu-ray.com front cover so the cover always shows for blu-ray.com entries.
+ */
+fun PhysicalMedia.displayImages(): List<PhysicalMediaImage> {
+    if (images.isNotEmpty()) return images
+    val cover = bluRayCoverImageUrl(blurayComUrl) ?: return emptyList()
+    return listOf(PhysicalMediaImage(imageUrl = cover, description = "Front Cover"))
+}
+
+/**
  * Data class for watched entries
  * A movie can be watched multiple times with different ratings
  */

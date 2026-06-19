@@ -335,20 +335,20 @@ class MovieMetadataModal(
                                                     }
                                                 }
                                                 // Physical Media Images Gallery
-                                                if (media.images.isNotEmpty()) {
+                                                val allImages = media.displayImages()
+                                                if (allImages.isNotEmpty()) {
                                                     div {
                                                         style = "margin-top: 12px; padding-top: 12px; border-top: 1px solid #e8eaed;"
                                                         
                                                         div {
                                                             style = "font-size: 12px; font-weight: 600; color: #5f6368; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;"
                                                             span { +"📸" }
-                                                            +"Images (${media.images.size})"
+                                                            +"Images (${allImages.size})"
                                                         }
 
                                                         div {
                                                             style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 12px;"
-                                                            val allImages = media.images
-                                                            media.images.forEachIndexed { imageIndex, image ->
+                                                            allImages.forEachIndexed { imageIndex, image ->
                                                                 div {
                                                                     style = "position: relative;"
                                                                     img {

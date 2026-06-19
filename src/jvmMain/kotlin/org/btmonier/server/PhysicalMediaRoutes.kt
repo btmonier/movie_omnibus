@@ -5,15 +5,84 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.Serializable
+import org.btmonier.BluRayComUtils
 import org.btmonier.MediaType
 import org.btmonier.PhysicalMedia
 import org.btmonier.database.MovieDao
 import org.btmonier.database.PhysicalMediaDao
+import org.jsoup.Jsoup
+
+/**
+ * Request body for scraping a blu-ray.com release URL.
+ */
+@Serializable
+data class BluRayScrapeRequest(val url: String)
+
+/**
+ * Response for the physical media scrape endpoint. Returns a preview
+ * [PhysicalMedia] (no database id) that the client uses to prefill the form.
+ */
+@Serializable
+data class PhysicalMediaScrapeResponse(
+    val success: Boolean,
+    val physicalMedia: PhysicalMedia? = null,
+    val error: String? = null
+)
 
 /**
  * Configure physical media-related API routes.
  */
 fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMediaDao) {
+
+    // POST /api/physical-media/scrape - Scrape physical media details from a
+    // blu-ray.com release URL. This is a preview only; nothing is persisted.
+    post("/api/physical-media/scrape") {
+        try {
+            val request = call.receive<BluRayScrapeRequest>()
+            val url = request.url.trim()
+
+            if (url.isBlank()) {
+                call.respond(HttpStatusCode.BadRequest, PhysicalMediaScrapeResponse(
+                    success = false,
+                    error = "URL is required"
+                ))
+                return@post
+            }
+
+            if (!BluRayComUtils.isBluRayComUrl(url)) {
+                call.respond(HttpStatusCode.BadRequest, PhysicalMediaScrapeResponse(
+                    success = false,
+                    error = "URL must be a valid blu-ray.com release URL (e.g., https://www.blu-ray.com/movies/Movie-Title/123456/ or https://www.blu-ray.com/dvd/Movie-Title-DVD/123456/)"
+                ))
+                return@post
+            }
+
+            try {
+                val doc = Jsoup.connect(url)
+                    .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    .timeout(15000)
+                    .get()
+
+                val physicalMedia = BluRayComUtils.extractPhysicalMedia(doc, url)
+
+                call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
+                    success = true,
+                    physicalMedia = physicalMedia
+                ))
+            } catch (e: Exception) {
+                call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
+                    success = false,
+                    error = "Failed to scrape physical media data: ${e.message}"
+                ))
+            }
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.BadRequest, PhysicalMediaScrapeResponse(
+                success = false,
+                error = "Invalid request: ${e.message}"
+            ))
+        }
+    }
 
     // GET /api/movies/{id}/physical-media - Get all physical media for a movie
     get("/api/movies/{id}/physical-media") {

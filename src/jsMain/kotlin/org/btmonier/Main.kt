@@ -501,6 +501,31 @@ suspend fun scrapeLetterboxdUrl(url: String): ScrapeResponse {
     return Json.decodeFromString(ScrapeResponse.serializer(), json)
 }
 
+@kotlinx.serialization.Serializable
+data class BluRayScrapeRequest(val url: String)
+
+@kotlinx.serialization.Serializable
+data class PhysicalMediaScrapeResponse(
+    val success: Boolean,
+    val physicalMedia: PhysicalMedia? = null,
+    val error: String? = null
+)
+
+/**
+ * Scrape physical media details from a blu-ray.com release URL.
+ * Returns a preview PhysicalMedia (no id) used to prefill the form.
+ */
+suspend fun scrapeBluRayUrl(url: String): PhysicalMediaScrapeResponse {
+    val response = window.fetch("$API_BASE_URL/physical-media/scrape", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(BluRayScrapeRequest.serializer(), BluRayScrapeRequest(url))
+    )).await()
+
+    val json = response.text().await()
+    return Json.decodeFromString(PhysicalMediaScrapeResponse.serializer(), json)
+}
+
 // ==================== Random Movie Picker API ====================
 
 /**
