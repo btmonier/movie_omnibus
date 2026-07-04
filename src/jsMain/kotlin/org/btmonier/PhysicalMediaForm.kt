@@ -43,7 +43,7 @@ class PhysicalMediaForm(
     fun showEdit(media: PhysicalMedia) {
         editingMedia = media
         imageUrls.clear()
-        imageUrls.addAll(media.images.map { it.imageUrl to it.description })
+        imageUrls.addAll(media.displayImages().map { it.imageUrl to it.description })
         if (imageUrls.isEmpty()) {
             imageUrls.add("" to null) // Ensure at least one image field
         }
