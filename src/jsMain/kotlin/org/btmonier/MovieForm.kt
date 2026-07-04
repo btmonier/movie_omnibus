@@ -418,8 +418,8 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                                     }
                                     td {
                                         style = "padding: 10px 12px; color: #5f6368;"
-                                        if (media.images.isNotEmpty()) {
-                                            val mediaImages = media.images
+                                        val mediaImages = media.displayImages()
+                                        if (mediaImages.isNotEmpty()) {
                                             span {
                                                 style = """
                                                     cursor: pointer;
@@ -428,7 +428,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                                                 """.trimIndent()
                                                 attributes["onmouseover"] = "this.style.textDecoration='underline'"
                                                 attributes["onmouseout"] = "this.style.textDecoration='none'"
-                                                +"${media.images.size} image${if (media.images.size != 1) "s" else ""}"
+                                                +"${mediaImages.size} image${if (mediaImages.size != 1) "s" else ""}"
                                                 onClickFunction = {
                                                     ImageLightbox.show(mediaImages, 0)
                                                 }
