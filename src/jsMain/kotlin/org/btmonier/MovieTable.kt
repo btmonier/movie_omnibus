@@ -1,6 +1,7 @@
 package org.btmonier
 
 import kotlinx.browser.document
+import kotlinx.browser.localStorage
 import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
@@ -8,6 +9,8 @@ import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
 import kotlinx.html.js.onInputFunction
 import org.w3c.dom.*
+
+private const val VIEW_MODE_STORAGE_KEY = "movieViewMode"
 
 class MovieTable(private val container: Element) {
     // Filter state (now supporting multiple selections)
@@ -24,6 +27,11 @@ class MovieTable(private val container: Element) {
 
     enum class SortField { TITLE, RELEASE_DATE, DATE_ADDED, RUNTIME }
     enum class SortDirection { ASC, DESC }
+
+    enum class ViewMode { GRID, LIST }
+
+    // View mode state (persisted across reloads)
+    private var viewMode: ViewMode = loadStoredViewMode()
 
     // Pagination state (server-provided)
     private var currentPage = 1
@@ -70,6 +78,25 @@ class MovieTable(private val container: Element) {
 
     private val confirmDialog = ConfirmDialog(container)
     private val alertDialog = AlertDialog(container)
+
+    private fun loadStoredViewMode(): ViewMode {
+        return when (localStorage.getItem(VIEW_MODE_STORAGE_KEY)) {
+            "LIST" -> ViewMode.LIST
+            else -> ViewMode.GRID
+        }
+    }
+
+    private fun saveViewMode(mode: ViewMode) {
+        localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode.name)
+    }
+
+    /**
+     * Returns the URL of the first available cover image for the movie's first
+     * physical media entry (stored image or derived blu-ray.com cover), or null.
+     */
+    private fun coverThumbnailUrl(movie: MovieMetadata): String? {
+        return movie.physicalMedia.firstOrNull()?.displayImages()?.firstOrNull()?.imageUrl
+    }
 
     fun render() {
         container.innerHTML = ""
@@ -588,6 +615,58 @@ class MovieTable(private val container: Element) {
                                     currentPage = 1
                                     renderFilters()
                                     mainScope.launch { loadMovies() }
+                                }
+                            }
+                        }
+
+                        // View mode toggle (grid / list)
+                        div {
+                            label {
+                                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: #5f6368; visibility: hidden;"
+                                +"View"
+                            }
+                            div {
+                                style = """
+                                    display: flex;
+                                    border: 1px solid #dadce0;
+                                    border-radius: 8px;
+                                    overflow: hidden;
+                                """.trimIndent()
+
+                                listOf(
+                                    ViewMode.GRID to "mdi-view-grid",
+                                    ViewMode.LIST to "mdi-view-list"
+                                ).forEach { (mode, iconClass) ->
+                                    val isActive = viewMode == mode
+                                    button {
+                                        style = """
+                                            padding: 10px 14px;
+                                            font-size: 18px;
+                                            cursor: pointer;
+                                            background-color: ${if (isActive) "#1a73e8" else "white"};
+                                            color: ${if (isActive) "white" else "#5f6368"};
+                                            border: none;
+                                            transition: background-color 0.2s;
+                                            display: flex;
+                                            align-items: center;
+                                            justify-content: center;
+                                        """.trimIndent()
+                                        if (!isActive) {
+                                            attributes["onmouseover"] = "this.style.backgroundColor='#f1f3f4'"
+                                            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                                        }
+                                        span {
+                                            classes = setOf("mdi", iconClass)
+                                        }
+                                        onClickFunction = {
+                                            if (viewMode != mode) {
+                                                viewMode = mode
+                                                saveViewMode(mode)
+                                                renderFilters()
+                                                renderCards(useClientSidePagination = usingClientSideFiltering)
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1489,7 +1568,7 @@ class MovieTable(private val container: Element) {
                     }
                     +"No movies match your search criteria."
                 }
-            } else {
+            } else if (viewMode == ViewMode.GRID) {
                 // Cards grid
                 div {
                     style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px;"
@@ -1520,6 +1599,30 @@ class MovieTable(private val container: Element) {
                                 onClickFunction = {
                                     metadataModal.show(movie)
                                 }
+
+                                val gridThumbUrl = coverThumbnailUrl(movie)
+
+                                div {
+                                  style = "display: flex; align-items: flex-start; gap: 12px;"
+
+                                  if (gridThumbUrl != null) {
+                                    img {
+                                        src = gridThumbUrl
+                                        alt = "${movie.title} cover"
+                                        style = """
+                                            width: 44px;
+                                            height: 64px;
+                                            object-fit: cover;
+                                            border-radius: 4px;
+                                            flex-shrink: 0;
+                                            box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+                                            background-color: rgba(255,255,255,0.15);
+                                        """.trimIndent()
+                                    }
+                                  }
+
+                                  div {
+                                    style = "flex: 1; min-width: 0;"
 
                                 // Title
                                 h3 {
@@ -1563,6 +1666,8 @@ class MovieTable(private val container: Element) {
                                         val dateAdded = movie.createdAt.substringBefore("T") // Extract date part from ISO datetime
                                         +"Added: $dateAdded"
                                     }
+                                }
+                                  }
                                 }
                             }
 
@@ -1666,6 +1771,196 @@ class MovieTable(private val container: Element) {
                             // Card actions
                             div {
                                 style = "padding: 12px 20px; background-color: #f8f9fa; border-top: 1px solid #e8eaed; display: flex; justify-content: flex-end; gap: 8px;"
+
+                                button {
+                                    style = """
+                                        padding: 8px 16px;
+                                        font-size: 13px;
+                                        cursor: pointer;
+                                        background-color: transparent;
+                                        color: #1a73e8;
+                                        border: none;
+                                        border-radius: 4px;
+                                        font-weight: 500;
+                                        transition: background-color 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='#e8f0fe'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+                                    +"Edit"
+                                    onClickFunction = {
+                                        showEditMovieForm(movie)
+                                    }
+                                }
+                                button {
+                                    style = """
+                                        padding: 8px 16px;
+                                        font-size: 13px;
+                                        cursor: pointer;
+                                        background-color: transparent;
+                                        color: #d93025;
+                                        border: none;
+                                        border-radius: 4px;
+                                        font-weight: 500;
+                                        transition: background-color 0.2s;
+                                    """.trimIndent()
+                                    attributes["onmouseover"] = "this.style.backgroundColor='#fce8e6'"
+                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+                                    +"Delete"
+                                    onClickFunction = {
+                                        handleDeleteMovie(movie)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                // List view: horizontal rows
+                div {
+                    style = "display: flex; flex-direction: column; gap: 10px;"
+
+                    paginatedMovies.forEach { movie ->
+                        val listThumbUrl = coverThumbnailUrl(movie)
+
+                        div {
+                            style = """
+                                display: flex;
+                                align-items: stretch;
+                                gap: 16px;
+                                background: linear-gradient(145deg, #ffffff 0%, #fafbfc 100%);
+                                border-radius: 12px;
+                                box-shadow: 0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04);
+                                overflow: hidden;
+                                padding: 14px 18px;
+                                transition: transform 0.2s ease, box-shadow 0.2s ease;
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 6px 18px rgba(0,0,0,0.12), 0 3px 6px rgba(0,0,0,0.08)'"
+                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.04)'"
+
+                            // Cover thumbnail (or placeholder)
+                            if (listThumbUrl != null) {
+                                img {
+                                    src = listThumbUrl
+                                    alt = "${movie.title} cover"
+                                    style = """
+                                        width: 60px;
+                                        height: 90px;
+                                        object-fit: cover;
+                                        border-radius: 6px;
+                                        flex-shrink: 0;
+                                        cursor: pointer;
+                                        box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+                                    """.trimIndent()
+                                    onClickFunction = {
+                                        metadataModal.show(movie)
+                                    }
+                                }
+                            } else {
+                                div {
+                                    style = """
+                                        width: 60px;
+                                        height: 90px;
+                                        border-radius: 6px;
+                                        flex-shrink: 0;
+                                        background: linear-gradient(135deg, #e8f0fe 0%, #d2e3fc 100%);
+                                        color: #5f6368;
+                                        display: flex;
+                                        align-items: center;
+                                        justify-content: center;
+                                        cursor: pointer;
+                                    """.trimIndent()
+                                    onClickFunction = {
+                                        metadataModal.show(movie)
+                                    }
+                                    span {
+                                        classes = setOf("mdi", "mdi-disc")
+                                        style = "font-size: 26px; opacity: 0.6;"
+                                    }
+                                }
+                            }
+
+                            // Main info
+                            div {
+                                style = "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; justify-content: center;"
+
+                                // Title
+                                h3 {
+                                    style = "margin: 0; font-size: 17px; font-weight: 500; line-height: 1.3; color: #202124; font-family: 'Google Sans', 'Roboto', sans-serif; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"
+                                    onClickFunction = {
+                                        metadataModal.show(movie)
+                                    }
+                                    +movie.title
+                                }
+
+                                // Meta line: year, runtime, country
+                                div {
+                                    style = "display: flex; align-items: center; flex-wrap: wrap; gap: 14px; font-size: 12px; color: #5f6368;"
+                                    span {
+                                        style = "display: flex; align-items: center; gap: 4px;"
+                                        span {
+                                            classes = setOf("mdi", "mdi-calendar")
+                                            style = "font-size: 15px;"
+                                        }
+                                        +(movie.release_date?.toString() ?: "NA")
+                                    }
+                                    span {
+                                        style = "display: flex; align-items: center; gap: 4px;"
+                                        span {
+                                            classes = setOf("mdi", "mdi-clock-outline")
+                                            style = "font-size: 15px;"
+                                        }
+                                        val runtimeStr = if (movie.runtime_mins != null) {
+                                            val hours = movie.runtime_mins / 60
+                                            val mins = movie.runtime_mins % 60
+                                            if (hours > 0) "${hours}h ${mins}m" else "${mins}m"
+                                        } else {
+                                            "NA"
+                                        }
+                                        +runtimeStr
+                                    }
+                                    if (movie.country.isNotEmpty()) {
+                                        span {
+                                            style = "display: flex; align-items: center; gap: 4px;"
+                                            span {
+                                                classes = setOf("mdi", "mdi-earth")
+                                                style = "font-size: 15px;"
+                                            }
+                                            +movie.country.take(2).joinToString(" • ")
+                                        }
+                                    }
+                                }
+
+                                // Genre pills + physical media badge
+                                div {
+                                    style = "display: flex; align-items: center; flex-wrap: wrap; gap: 6px;"
+                                    movie.genres.take(3).forEach { genre ->
+                                        span {
+                                            style = "display: inline-block; padding: 3px 9px; background-color: #e8f0fe; color: #1967d2; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                            +genre
+                                        }
+                                    }
+                                    if (movie.genres.size > 3) {
+                                        span {
+                                            style = "display: inline-block; padding: 3px 9px; background-color: #f1f3f4; color: #5f6368; border-radius: 16px; font-size: 11px; font-weight: 500;"
+                                            +"+${movie.genres.size - 3}"
+                                        }
+                                    }
+                                    if (movie.physicalMedia.isNotEmpty()) {
+                                        span {
+                                            style = "display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; border-radius: 12px; font-size: 11px; font-weight: 600;"
+                                            span {
+                                                classes = setOf("mdi", "mdi-disc")
+                                                style = "font-size: 13px;"
+                                            }
+                                            +"${movie.physicalMedia.size} ${if (movie.physicalMedia.size == 1) "entry" else "entries"}"
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Actions
+                            div {
+                                style = "display: flex; align-items: center; gap: 4px; flex-shrink: 0;"
 
                                 button {
                                     style = """
