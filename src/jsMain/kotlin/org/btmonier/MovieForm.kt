@@ -210,7 +210,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
     }
 
     private fun DIV.renderFormFields() {
-        fun inputField(labelText: String, id: String, value: String = "", placeholder: String = "", required: Boolean = true) {
+        fun FlowContent.inputField(labelText: String, id: String, value: String = "", placeholder: String = "", required: Boolean = true) {
             div {
                 style = "margin-bottom: 16px;"
                 label {
@@ -243,7 +243,7 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
             }
         }
 
-        fun textAreaField(labelText: String, id: String, value: String = "", placeholder: String = "") {
+        fun FlowContent.textAreaField(labelText: String, id: String, value: String = "", placeholder: String = "") {
             div {
                 style = "margin-bottom: 16px;"
                 label {
@@ -274,31 +274,55 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
 
         val movie = editingMovie
 
-        inputField("Title", "form-title", movie?.title ?: "", "Movie Title")
-        textAreaField("Description (optional)", "form-description", movie?.description ?: "", "Movie synopsis or description")
-        textAreaField("Alternate Titles (optional)", "form-alternate-titles", movie?.alternateTitles?.joinToString(", ") ?: "", "Other titles (comma-separated)")
-        inputField("Letterboxd URL", "form-url", movie?.url ?: "", "https://letterboxd.com/film/...")
+        // Group the movie metadata fields under a collapsible "Movie Details" dropdown.
+        // Collapsed by default when editing (so Physical Media sits near the top), expanded
+        // when creating a new movie so all fields are visible.
+        details {
+            if (movie?.id == null) {
+                attributes["open"] = "true"
+            }
 
-        // Genre selector placeholder
-        div {
-            id = "form-genres-container"
+            summary {
+                style = """
+                    margin-top: 8px;
+                    margin-bottom: 16px;
+                    color: #5f6368;
+                    font-size: 16px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    padding: 10px 0;
+                    border-bottom: 1px solid #dadce0;
+                    outline: none;
+                """.trimIndent()
+                +"Movie Details"
+            }
+
+            inputField("Title", "form-title", movie?.title ?: "", "Movie Title")
+            textAreaField("Description (optional)", "form-description", movie?.description ?: "", "Movie synopsis or description")
+            textAreaField("Alternate Titles (optional)", "form-alternate-titles", movie?.alternateTitles?.joinToString(", ") ?: "", "Other titles (comma-separated)")
+            inputField("Letterboxd URL", "form-url", movie?.url ?: "", "https://letterboxd.com/film/...")
+
+            // Genre selector placeholder
+            div {
+                id = "form-genres-container"
+            }
+
+            // Subgenre selector placeholder
+            div {
+                id = "form-subgenres-container"
+            }
+
+            // Collection selector placeholder
+            div {
+                id = "form-collections-container"
+            }
+
+            textAreaField("Themes", "form-themes", movie?.themes?.joinToString(", ") ?: "", "Coming of Age, Love, Revenge (comma-separated)")
+            textAreaField("Countries", "form-countries", movie?.country?.joinToString(", ") ?: "", "USA, France, Japan (comma-separated)")
+            textAreaField("Cast", "form-cast", movie?.cast?.joinToString(", ") ?: "", "Actor 1, Actor 2 (comma-separated)")
+            inputField("Release Year", "form-release-year", movie?.release_date?.toString() ?: "", "2024", required = false)
+            inputField("Runtime", "form-runtime", formatRuntimeForInput(movie?.runtime_mins), "1h 57m or 117", required = false)
         }
-
-        // Subgenre selector placeholder
-        div {
-            id = "form-subgenres-container"
-        }
-
-        // Collection selector placeholder
-        div {
-            id = "form-collections-container"
-        }
-
-        textAreaField("Themes", "form-themes", movie?.themes?.joinToString(", ") ?: "", "Coming of Age, Love, Revenge (comma-separated)")
-        textAreaField("Countries", "form-countries", movie?.country?.joinToString(", ") ?: "", "USA, France, Japan (comma-separated)")
-        textAreaField("Cast", "form-cast", movie?.cast?.joinToString(", ") ?: "", "Actor 1, Actor 2 (comma-separated)")
-        inputField("Release Year", "form-release-year", movie?.release_date?.toString() ?: "", "2024", required = false)
-        inputField("Runtime", "form-runtime", formatRuntimeForInput(movie?.runtime_mins), "1h 57m or 117", required = false)
 
         // Physical Media Section (only show when editing existing movie)
         if (movie?.id != null) {
