@@ -191,19 +191,25 @@ class GcsService private constructor(
 
     /**
      * Check if a URL is a signed GCS URL that we generated.
-     * Signed URLs look like: https://storage.googleapis.com/bucket/path?X-Goog-Algorithm=...
+     * Handles both URL styles produced by the client library:
+     * - path-style:            https://storage.googleapis.com/bucket/path?X-Goog-Algorithm=...
+     * - virtual-hosted-style:  https://bucket.storage.googleapis.com/path?X-Goog-Algorithm=...
      */
     fun isSignedGcsUrl(url: String): Boolean {
-        return url.startsWith("https://storage.googleapis.com/") && 
-               url.contains("X-Goog-")
+        val isGcsHost = url.startsWith("https://storage.googleapis.com/") ||
+            url.startsWith("https://$bucketName.storage.googleapis.com/")
+        return isGcsHost && url.contains("X-Goog-")
     }
 
     /**
      * Extract the original storable path from a signed GCS URL.
-     * Converts https://storage.googleapis.com/bucket-name/path/to/object?... back to path/to/object
+     * Converts either
+     * - https://storage.googleapis.com/bucket-name/path/to/object?...   (path-style), or
+     * - https://bucket-name.storage.googleapis.com/path/to/object?...   (virtual-hosted-style)
+     * back to path/to/object.
      *
      * @param url The URL to clean (can be a signed URL, regular URL, or GCS path)
-     * @return The storable path (without query parameters and bucket prefix)
+     * @return The storable path (without query parameters and bucket/host prefix)
      */
     fun cleanUrlForStorage(url: String): String {
         if (!isSignedGcsUrl(url)) {
@@ -212,13 +218,19 @@ class GcsService private constructor(
 
         // Remove query parameters
         val urlWithoutParams = url.substringBefore("?")
-        
-        // Extract path from https://storage.googleapis.com/bucket-name/path/to/object
-        val prefix = "https://storage.googleapis.com/$bucketName/"
-        return if (urlWithoutParams.startsWith(prefix)) {
-            urlWithoutParams.removePrefix(prefix)
+
+        // Virtual-hosted-style: https://bucket-name.storage.googleapis.com/path/to/object
+        val virtualHostPrefix = "https://$bucketName.storage.googleapis.com/"
+        if (urlWithoutParams.startsWith(virtualHostPrefix)) {
+            return urlWithoutParams.removePrefix(virtualHostPrefix)
+        }
+
+        // Path-style: https://storage.googleapis.com/bucket-name/path/to/object
+        val pathStylePrefix = "https://storage.googleapis.com/$bucketName/"
+        return if (urlWithoutParams.startsWith(pathStylePrefix)) {
+            urlWithoutParams.removePrefix(pathStylePrefix)
         } else {
-            // Fallback: just strip query params
+            // Fallback: just strip query params so an oversized signed URL is never stored
             urlWithoutParams
         }
     }

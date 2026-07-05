@@ -741,12 +741,15 @@ class PhysicalMediaForm(
             val location = (document.getElementById("physical-media-form-location") as HTMLSelectElement).value.trim()
                 .takeIf { it.isNotBlank() }
 
-            // Collect images
-            val images = imageUrls.indices.mapNotNull { index ->
-                val url = (document.getElementById("image-url-$index") as? HTMLInputElement)?.value?.trim()
-                val desc = (document.getElementById("image-desc-$index") as? HTMLInputElement)?.value?.trim()
-                if (!url.isNullOrBlank()) {
-                    PhysicalMediaImage(url, desc.takeIf { !it.isNullOrBlank() })
+            // Collect images from the in-memory list (synced from the DOM). Using
+            // syncImagesFromDom keeps any user edits while falling back to the
+            // originally loaded value when a DOM node can't be read, so an
+            // existing (e.g. GCS signed) image URL is never silently dropped.
+            syncImagesFromDom()
+            val images = imageUrls.mapNotNull { (url, desc) ->
+                val trimmed = url.trim()
+                if (trimmed.isNotBlank()) {
+                    PhysicalMediaImage(trimmed, desc?.takeIf { it.isNotBlank() })
                 } else {
                     null
                 }

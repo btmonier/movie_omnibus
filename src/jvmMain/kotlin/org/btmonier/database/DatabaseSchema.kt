@@ -144,7 +144,11 @@ object PhysicalMediaTypes : IntIdTable("physical_media_types") {
  */
 object PhysicalMediaImages : IntIdTable("physical_media_images") {
     val physicalMediaId = reference("physical_media_id", PhysicalMedia)
-    val imageUrl = varchar("image_url", 500)
+    // Use text (not a bounded varchar) so long values such as GCS signed URLs
+    // can never overflow the column. Existing databases need a one-off migration
+    // (SchemaUtils.create does not ALTER existing columns):
+    //   ALTER TABLE physical_media_images ALTER COLUMN image_url TYPE text;
+    val imageUrl = text("image_url")
     val description = varchar("description", 200).nullable()
 }
 
