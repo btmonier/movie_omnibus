@@ -10,8 +10,20 @@ A Kotlin/JS web application for managing and viewing your movie collection with 
 - **Filter by Country**: Multi-select dropdown to filter movies by country/countries
 - **Filter by Media Type**: Filter by physical media type (VHS, DVD, Blu-ray, 4K, Digital)
 - **Sortable Columns**: Click column headers to sort
-- **Pagination**: Navigate large collections with configurable page sizes (10, 25, 50, 100)
+- **Pagination**: Navigate large collections with configurable page sizes (12, 24, 48, 96)
 - **Tag-based Filtering**: Visual tags show active filters with easy removal
+
+#### Pagination Controls
+
+The controls below the movie list let you reach any page in a single action:
+
+- **Numbered pages**: The pages around the current one are shown directly, with the first and last page always present and an ellipsis marking any gap (for example `1 … 7 8 9 10 11 … 47`)
+- **First / Last**: Jump straight to either end of the collection
+- **Previous / Next**: Step one page at a time
+- **Go to page**: For collections longer than five pages, type a page number and press Enter (out-of-range values are clamped to the nearest valid page)
+- **Per page**: Choose 12, 24, 48, or 96 movies per page; changing this returns you to page 1
+
+Changing pages scrolls back to the top of the list.
 
 ### Adding Movies
 - **Letterboxd Integration**: Enter a Letterboxd URL to automatically scrape movie data
