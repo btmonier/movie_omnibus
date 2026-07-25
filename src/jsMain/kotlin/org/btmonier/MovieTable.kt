@@ -2,6 +2,7 @@ package org.btmonier
 
 import kotlinx.browser.document
 import kotlinx.browser.localStorage
+import kotlinx.browser.window
 import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
@@ -2009,133 +2010,41 @@ class MovieTable(private val container: Element) {
             // Pagination controls
             if (totalPages > 1 || paginatedMovies.isNotEmpty()) {
                 div {
-                    style = """
-                        margin-top: 32px;
-                        display: flex;
-                        justify-content: center;
-                        align-items: center;
-                        gap: 8px;
-                        flex-wrap: wrap;
-                    """.trimIndent()
-
-                    // Previous button
-                    button {
-                        style = """
-                            padding: 10px 20px;
-                            font-size: 14px;
-                            cursor: ${if (currentPage > 1) "pointer" else "not-allowed"};
-                            background-color: ${if (currentPage > 1) "#1a73e8" else "#dadce0"};
-                            color: ${if (currentPage > 1) "white" else "#5f6368"};
-                            border: none;
-                            border-radius: 24px;
-                            font-weight: 500;
-                            transition: all 0.2s;
-                        """.trimIndent()
-                        disabled = (currentPage <= 1)
-                        if (currentPage > 1) {
-                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
-                        }
-                        span {
-                            classes = setOf("mdi", "mdi-chevron-left")
-                            style = "font-size: 18px;"
-                        }
-                        +"Previous"
-                        onClickFunction = {
-                            if (currentPage > 1) {
-                                currentPage--
-                                if (usingClientSideFiltering) {
-                                    renderCards(useClientSidePagination = true)
-                                } else {
-                                    mainScope.launch { loadMovies() }
-                                }
-                            }
-                        }
-                    }
-
-                    // Page info
-                    span {
-                        style = "padding: 10px 20px; font-size: 14px; color: #5f6368; background-color: white; border-radius: 24px; border: 1px solid #dadce0;"
-                        +"Page $currentPage of $totalPages"
-                    }
-
-                    // Next button
-                    button {
-                        style = """
-                            padding: 10px 20px;
-                            font-size: 14px;
-                            cursor: ${if (currentPage < totalPages) "pointer" else "not-allowed"};
-                            background-color: ${if (currentPage < totalPages) "#1a73e8" else "#dadce0"};
-                            color: ${if (currentPage < totalPages) "white" else "#5f6368"};
-                            border: none;
-                            border-radius: 24px;
-                            font-weight: 500;
-                            transition: all 0.2s;
-                        """.trimIndent()
-                        disabled = (currentPage >= totalPages)
-                        if (currentPage < totalPages) {
-                            attributes["onmouseover"] = "this.style.backgroundColor='#1765cc'; this.style.transform='scale(1.02)'"
-                            attributes["onmouseout"] = "this.style.backgroundColor='#1a73e8'; this.style.transform='scale(1)'"
-                        }
-                        +"Next"
-                        span {
-                            classes = setOf("mdi", "mdi-chevron-right")
-                            style = "font-size: 18px;"
-                        }
-                        onClickFunction = {
-                            if (currentPage < totalPages) {
-                                currentPage++
-                                if (usingClientSideFiltering) {
-                                    renderCards(useClientSidePagination = true)
-                                } else {
-                                    mainScope.launch { loadMovies() }
-                                }
-                            }
-                        }
-                    }
-
-                    // Items per page selector
-                    div {
-                        style = "margin-left: 16px; display: flex; align-items: center; gap: 8px;"
-                        span {
-                            style = "font-size: 13px; color: #5f6368;"
-                            +"Per page:"
-                        }
-                        select {
-                            style = """
-                                padding: 8px 14px;
-                                font-size: 14px;
-                                border: 1px solid #dadce0;
-                                border-radius: 24px;
-                                background-color: white;
-                                cursor: pointer;
-                            """.trimIndent()
-
-                            listOf(12, 24, 48, 96).forEach { size ->
-                                option {
-                                    value = size.toString()
-                                    selected = (itemsPerPage == size)
-                                    +size.toString()
-                                }
-                            }
-
-                            onChangeFunction = {
-                                val select = it.target as? HTMLSelectElement
-                                select?.value?.toIntOrNull()?.let { newSize ->
-                                    itemsPerPage = newSize
-                                    currentPage = 1
-                                    if (usingClientSideFiltering) {
-                                        renderCards(useClientSidePagination = true)
-                                    } else {
-                                        mainScope.launch { loadMovies() }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    id = "pagination-container"
+                    paginationControls(
+                        currentPage = currentPage,
+                        totalPages = totalPages,
+                        itemsPerPage = itemsPerPage,
+                        onPageChange = ::goToPage,
+                        onPageSizeChange = ::changePageSize,
+                    )
                 }
             }
         }
+    }
+
+    /** Re-renders the current page, going back to the server unless the data is already local. */
+    private fun refreshCurrentPage() {
+        if (usingClientSideFiltering) {
+            renderCards(useClientSidePagination = true)
+        } else {
+            mainScope.launch { loadMovies() }
+        }
+    }
+
+    private fun goToPage(page: Int) {
+        val target = page.coerceIn(1, totalPages)
+        if (target == currentPage) return
+        currentPage = target
+        window.scrollTo(0.0, 0.0)
+        refreshCurrentPage()
+    }
+
+    private fun changePageSize(newSize: Int) {
+        if (newSize == itemsPerPage) return
+        itemsPerPage = newSize
+        currentPage = 1
+        refreshCurrentPage()
     }
 
     private fun updateEditToolsDropdown() {
