@@ -213,6 +213,26 @@ tasks.register<JavaExec>("migrateData") {
     }
 }
 
+// Custom task for re-scraping cast/crew for movies already in the database
+tasks.register<JavaExec>("backfillCastCrew") {
+    group = "application"
+    description = "Re-scrape cast and crew for movies stored with empty cast/crew data"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.BackfillCastCrewKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Allow passing arguments from command line
+    // Usage: ./gradlew backfillCastCrew --args="--dry-run --limit 5"
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
 // Custom task for listing all movies in the database
 tasks.register<JavaExec>("listMovies") {
     group = "application"
@@ -275,20 +295,6 @@ tasks.register<JavaExec>("resetDatabase") {
     if (project.hasProperty("args")) {
         args(project.property("args").toString().split(" "))
     }
-}
-
-// Custom task for testing extraction on example.html
-tasks.register<JavaExec>("testExampleHtml") {
-    group = "verification"
-    description = "Test metadata extraction on the example.html file"
-    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
-    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
-    mainClass.set("org.btmonier.TestExampleHtmlKt")
-
-    // Use the same Java toolchain as the project (Java 21)
-    javaLauncher.set(javaToolchains.launcherFor {
-        languageVersion.set(JavaLanguageVersion.of(21))
-    })
 }
 
 // Custom task for backing up the database

@@ -21,45 +21,69 @@
     <!-- Country -->
     <a href="/films/country/usa/" class="text-slug">United States</a>
 
-    <!-- Cast -->
-    <div id="tab-cast" class="tabbed-content-block">
-        <div class="cast-list text-sluglist">
-            <p>
-                <a href="https://letterboxd.com/actor/tim-robbins/" class="text-slug tooltip" data-original-title="Andy Dufresne">Tim Robbins</a>
-                <a href="https://letterboxd.com/actor/morgan-freeman/" class="text-slug tooltip" data-original-title="Ellis Boyd 'Red' Redding">Morgan Freeman</a>
-                <a href="https://letterboxd.com/actor/bob-gunton/" class="text-slug tooltip" data-original-title="Warden Norton">Bob Gunton</a>
-            </p>
-        </div>
-    </div>
-
-    <!-- Crew -->
-    <div id="tab-crew" class="tabbed-content-block column-block -crewroles">
-        <h3>
-            <span class="crewrole -full">Director</span>
-        </h3>
-        <div class="text-sluglist">
-            <p>
-                <a href="https://letterboxd.com/director/frank-darabont/" class="text-slug">Frank Darabont</a>
-            </p>
+    <div class="cast-crew-details-tabs">
+        <div class="content-tab-filters">
+            <div class="tablist" role="tablist">
+                <a id="tab-cast" class="trigger" href="/film/the-shawshank-redemption/cast/" role="tab" aria-controls="tab-panel-cast" aria-selected="true">
+                    <span class="label">Cast</span>
+                </a>
+                <a id="tab-crew" class="trigger" href="/film/the-shawshank-redemption/crew/" role="tab" aria-controls="tab-panel-crew" aria-selected="false">
+                    <span class="label">Crew</span>
+                </a>
+                <a id="tab-details" class="trigger" href="/film/the-shawshank-redemption/details/" role="tab" aria-controls="tab-panel-details" aria-selected="false">
+                    <span class="label">Details</span>
+                </a>
+            </div>
         </div>
 
-        <h3>
-            <span class="crewrole -full">Writers</span>
-        </h3>
-        <div class="text-sluglist">
-            <p>
-                <a href="https://letterboxd.com/writer/frank-darabont/" class="text-slug">Frank Darabont</a>
-                <a href="https://letterboxd.com/writer/stephen-king/" class="text-slug">Stephen King</a>
-            </p>
+        <!-- Cast -->
+        <div id="tab-panel-cast" role="tabpanel">
+            <h3 class="hidden">Cast</h3>
+            <div class="cast-list text-sluglist">
+                <a title="Andy Dufresne" href="/actor/tim-robbins/" class="text-slug tooltip">Tim Robbins</a>
+                <a title="Ellis Boyd &#039;Red&#039; Redding" href="/actor/morgan-freeman/" class="text-slug tooltip">Morgan Freeman</a>
+                <a title="Warden Norton" href="/actor/bob-gunton/" class="text-slug tooltip">Bob Gunton</a>
+                <a class="text-slug" id="has-cast-overflow">Show All&hellip;</a>
+                <span id="cast-overflow" class="sluglist-overflow" style="display:none;">
+                    <a title="Heywood" href="/actor/william-sadler/" class="text-slug tooltip">William Sadler</a>
+                    <a title="Captain Byron T. Hadley" href="/actor/clancy-brown/" class="text-slug tooltip">Clancy Brown</a>
+                </span>
+            </div>
         </div>
 
-        <h3>
-            <span class="crewrole -full">Cinematography</span>
-        </h3>
-        <div class="text-sluglist">
-            <p>
-                <a href="https://letterboxd.com/cinematography/roger-deakins/" class="text-slug">Roger Deakins</a>
-            </p>
+        <!-- Crew -->
+        <div id="tab-panel-crew" class="column-block" role="tabpanel" hidden="until-found">
+            <h3>
+                <span class="crewrole -full">Director</span>
+                <span class="crewrole -short" aria-hidden="true">Director</span>
+            </h3>
+            <div class="text-sluglist">
+                <a href="/director/frank-darabont/" class="text-slug">Frank Darabont</a>
+            </div>
+
+            <h3>
+                <span class="crewrole -full">Writer</span>
+                <span class="crewrole -short" aria-hidden="true">Writer</span>
+            </h3>
+            <div class="text-sluglist">
+                <a href="/writer/frank-darabont/" class="text-slug">Frank Darabont</a>
+            </div>
+
+            <h3>
+                <span class="crewrole -full">Original Writer</span>
+                <span class="crewrole -short" aria-hidden="true">Original Writer</span>
+            </h3>
+            <div class="text-sluglist">
+                <a href="/original-writer/stephen-king/" class="text-slug">Stephen King</a>
+            </div>
+
+            <h3>
+                <span class="crewrole -full">Cinematography</span>
+                <span class="crewrole -short" aria-hidden="true">Cinematography</span>
+            </h3>
+            <div class="text-sluglist">
+                <a href="/cinematography/roger-deakins/" class="text-slug">Roger Deakins</a>
+            </div>
         </div>
     </div>
 

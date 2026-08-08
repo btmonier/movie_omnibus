@@ -288,18 +288,20 @@ class ScraperUtilsTest {
         assertTrue(metadata.country.contains("United States"))
 
         // Test new fields
-        assertEquals(3, metadata.cast.size)
+        assertEquals(5, metadata.cast.size)
         assertTrue(metadata.cast.contains("Tim Robbins"))
         assertTrue(metadata.cast.contains("Morgan Freeman"))
         assertTrue(metadata.cast.contains("Bob Gunton"))
+        assertTrue(metadata.cast.contains("William Sadler"))
+        assertTrue(metadata.cast.contains("Clancy Brown"))
 
-        assertEquals(3, metadata.crew.size)
+        assertEquals(4, metadata.crew.size)
         assertTrue(metadata.crew.containsKey("Director"))
         assertEquals(listOf("Frank Darabont"), metadata.crew["Director"])
-        assertTrue(metadata.crew.containsKey("Writers"))
-        assertEquals(2, metadata.crew["Writers"]?.size)
-        assertTrue(metadata.crew["Writers"]?.contains("Frank Darabont") == true)
-        assertTrue(metadata.crew["Writers"]?.contains("Stephen King") == true)
+        assertTrue(metadata.crew.containsKey("Writer"))
+        assertEquals(listOf("Frank Darabont"), metadata.crew["Writer"])
+        assertTrue(metadata.crew.containsKey("Original Writer"))
+        assertEquals(listOf("Stephen King"), metadata.crew["Original Writer"])
         assertTrue(metadata.crew.containsKey("Cinematography"))
         assertEquals(listOf("Roger Deakins"), metadata.crew["Cinematography"])
 
@@ -329,12 +331,12 @@ class ScraperUtilsTest {
         assertTrue(metadata.country.contains("United States"))
 
         // Test new fields
-        assertEquals(3, metadata.cast.size)
+        assertEquals(5, metadata.cast.size)
         assertTrue(metadata.cast.contains("Tim Robbins"))
         assertTrue(metadata.cast.contains("Morgan Freeman"))
         assertTrue(metadata.cast.contains("Bob Gunton"))
 
-        assertEquals(3, metadata.crew.size)
+        assertEquals(4, metadata.crew.size)
         assertTrue(metadata.crew.containsKey("Director"))
         assertEquals(listOf("Frank Darabont"), metadata.crew["Director"])
 
@@ -371,13 +373,17 @@ class ScraperUtilsTest {
         val html = """
             <html>
                 <body>
-                    <div id="tab-cast" class="tabbed-content-block">
+                    <div class="tablist" role="tablist">
+                        <a id="tab-cast" class="trigger" href="/film/test-movie/cast/" role="tab" aria-controls="tab-panel-cast">
+                            <span class="label">Cast</span>
+                        </a>
+                    </div>
+                    <div id="tab-panel-cast" role="tabpanel">
+                        <h3 class="hidden">Cast</h3>
                         <div class="cast-list text-sluglist">
-                            <p>
-                                <a href="/actor/actor1/" class="text-slug tooltip" data-original-title="Character 1">Actor One</a>
-                                <a href="/actor/actor2/" class="text-slug tooltip" data-original-title="Character 2">Actor Two</a>
-                                <a href="/actor/actor3/" class="text-slug tooltip" data-original-title="Character 3">Actor Three</a>
-                            </p>
+                            <a title="Character 1" href="/actor/actor1/" class="text-slug tooltip">Actor One</a>
+                            <a title="Character 2" href="/actor/actor2/" class="text-slug tooltip">Actor Two</a>
+                            <a title="Character 3" href="/actor/actor3/" class="text-slug tooltip">Actor Three</a>
                         </div>
                     </div>
                 </body>
@@ -391,6 +397,56 @@ class ScraperUtilsTest {
         assertTrue(cast.contains("Actor One"))
         assertTrue(cast.contains("Actor Two"))
         assertTrue(cast.contains("Actor Three"))
+    }
+
+    @Test
+    fun `extractCast includes overflow members and excludes the Show All toggle`() {
+        val html = """
+            <html>
+                <body>
+                    <div id="tab-panel-cast" role="tabpanel">
+                        <div class="cast-list text-sluglist">
+                            <a title="Character 1" href="/actor/actor1/" class="text-slug tooltip">Actor One</a>
+                            <a title="Character 2" href="/actor/actor2/" class="text-slug tooltip">Actor Two</a>
+                            <a class="text-slug" id="has-cast-overflow">Show All&hellip;</a>
+                            <span id="cast-overflow" class="sluglist-overflow" style="display:none;">
+                                <a title="Character 3" href="/actor/actor3/" class="text-slug tooltip">Actor Three</a>
+                                <a title="Character 4" href="/actor/actor4/" class="text-slug tooltip">Actor Four</a>
+                            </span>
+                        </div>
+                    </div>
+                </body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+        val cast = ScraperUtils.extractCast(doc)
+
+        assertEquals(listOf("Actor One", "Actor Two", "Actor Three", "Actor Four"), cast)
+        assertTrue(cast.none { it.contains("Show All", ignoreCase = true) })
+    }
+
+    @Test
+    fun `extractCast falls back to legacy tab-cast container`() {
+        val html = """
+            <html>
+                <body>
+                    <div id="tab-cast" class="tabbed-content-block">
+                        <div class="cast-list text-sluglist">
+                            <p>
+                                <a href="/actor/actor1/" class="text-slug tooltip" data-original-title="Character 1">Actor One</a>
+                                <a href="/actor/actor2/" class="text-slug tooltip" data-original-title="Character 2">Actor Two</a>
+                            </p>
+                        </div>
+                    </div>
+                </body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+        val cast = ScraperUtils.extractCast(doc)
+
+        assertEquals(listOf("Actor One", "Actor Two"), cast)
     }
 
     @Test
@@ -411,6 +467,47 @@ class ScraperUtilsTest {
 
     @Test
     fun `extractCrew extracts crew members with roles correctly`() {
+        val html = """
+            <html>
+                <body>
+                    <div class="tablist" role="tablist">
+                        <a id="tab-crew" class="trigger" href="/film/test-movie/crew/" role="tab" aria-controls="tab-panel-crew">
+                            <span class="label">Crew</span>
+                        </a>
+                    </div>
+                    <div id="tab-panel-crew" class="column-block" role="tabpanel" hidden="until-found">
+                        <h3>
+                            <span class="crewrole -full">Director</span>
+                            <span class="crewrole -short" aria-hidden="true">Director</span>
+                        </h3>
+                        <div class="text-sluglist">
+                            <a href="/director/director1/" class="text-slug">Director One</a>
+                        </div>
+                        <h3>
+                            <span class="crewrole -full">Assistant Directors</span>
+                            <span class="crewrole -short" aria-hidden="true">Asst. Directors</span>
+                        </h3>
+                        <div class="text-sluglist">
+                            <a href="/assistant-director/ad1/" class="text-slug">Assistant One</a>
+                            <a href="/assistant-director/ad2/" class="text-slug">Assistant Two</a>
+                        </div>
+                    </div>
+                </body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+        val crew = ScraperUtils.extractCrew(doc)
+
+        assertEquals(2, crew.size)
+        assertTrue(crew.containsKey("Director"))
+        assertEquals(listOf("Director One"), crew["Director"])
+        assertTrue(crew.containsKey("Assistant Directors"))
+        assertEquals(listOf("Assistant One", "Assistant Two"), crew["Assistant Directors"])
+    }
+
+    @Test
+    fun `extractCrew falls back to legacy tab-crew container`() {
         val html = """
             <html>
                 <body>
@@ -441,12 +538,27 @@ class ScraperUtilsTest {
         val crew = ScraperUtils.extractCrew(doc)
 
         assertEquals(2, crew.size)
-        assertTrue(crew.containsKey("Director"))
         assertEquals(listOf("Director One"), crew["Director"])
-        assertTrue(crew.containsKey("Writers"))
-        assertEquals(2, crew["Writers"]?.size)
-        assertTrue(crew["Writers"]?.contains("Writer One") == true)
-        assertTrue(crew["Writers"]?.contains("Writer Two") == true)
+        assertEquals(listOf("Writer One", "Writer Two"), crew["Writers"])
+    }
+
+    @Test
+    fun `extractCrew returns empty map when only the crew tab trigger is present`() {
+        val html = """
+            <html>
+                <body>
+                    <div class="tablist" role="tablist">
+                        <a id="tab-crew" class="trigger" href="/film/test-movie/crew/" role="tab" aria-controls="tab-panel-crew">
+                            <span class="label">Crew</span>
+                        </a>
+                    </div>
+                </body>
+            </html>
+        """.trimIndent()
+
+        val doc = Jsoup.parse(html)
+
+        assertTrue(ScraperUtils.extractCrew(doc).isEmpty())
     }
 
     @Test

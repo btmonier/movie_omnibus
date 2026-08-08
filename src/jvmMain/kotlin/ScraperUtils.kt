@@ -152,13 +152,23 @@ object ScraperUtils {
     /**
      * Extracts cast members from a Letterboxd movie page.
      *
+     * Letterboxd serves the cast inside `#tab-panel-cast`; on older pages `#tab-cast`
+     * was the container itself rather than the tab trigger link, so both are accepted.
+     * Casts longer than the visible list continue inside a hidden `#cast-overflow`
+     * span, which is included, while the "Show All" toggle that precedes it is not.
+     *
      * @param doc The JSoup document of a Letterboxd movie page
      * @return List of cast member names
      */
     fun extractCast(doc: Document): List<String> {
-        return doc.select("#tab-cast .cast-list a.text-slug")
+        val castPanel = doc.select("#tab-panel-cast").firstOrNull()
+            ?: doc.select("#tab-cast").firstOrNull()
+            ?: return emptyList()
+
+        return castPanel.select(".cast-list a.text-slug")
+            .filter { it.id() != "has-cast-overflow" }
             .map { it.text().trim() }
-            .filter { it.isNotBlank() }
+            .filter { it.isNotBlank() && !it.contains("Show All", ignoreCase = true) }
             .distinct()
     }
 
@@ -170,7 +180,9 @@ object ScraperUtils {
      */
     fun extractCrew(doc: Document): Map<String, List<String>> {
         val crewMap = mutableMapOf<String, List<String>>()
-        val crewTab = doc.select("#tab-crew").firstOrNull() ?: return emptyMap()
+        val crewTab = doc.select("#tab-panel-crew").firstOrNull()
+            ?: doc.select("#tab-crew").firstOrNull()
+            ?: return emptyMap()
 
         val headers = crewTab.select("h3")
         for (header in headers) {

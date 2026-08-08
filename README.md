@@ -12,7 +12,8 @@ cp database.properties.example database.properties
 # Edit database.properties with your credentials
 ```
 
-Then launch with the script for your platform — no Gradle commands or IDE needed:
+If you prefer to not run from Gradle (`./gradlew`) directly, startup scripts are
+available:
 
 | Platform                    | Launcher              |
 |-----------------------------|-----------------------|
@@ -55,9 +56,9 @@ To run the steps by hand instead:
 
 ## Documentation
 
-- [Database Setup](docs/database_setup.md) — PostgreSQL setup, API reference
-- [Web Viewer](docs/web_viewer.md) — Frontend architecture
-- [CLI Utilities](docs/cli_utilities.md) — Command-line tools
+- [Database Setup](docs/database_setup.md): PostgreSQL setup, API reference
+- [Web Viewer](docs/web_viewer.md): Frontend architecture
+- [CLI Utilities](docs/cli_utilities.md): Command-line tools
 
 ## Tech Stack
 
