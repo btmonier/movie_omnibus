@@ -10,13 +10,25 @@ A Kotlin Multiplatform application for managing your movie collection with Lette
 # Setup database (see docs/database_setup.md)
 cp database.properties.example database.properties
 # Edit database.properties with your credentials
+```
 
-# Build and run
+Then launch with the script for your platform — no Gradle commands or IDE needed:
+
+| Platform                    | Launcher              |
+|-----------------------------|-----------------------|
+| Windows                     | `start-server.bat` (double-click or run it) |
+| macOS / Linux / Git Bash    | `./start-server.sh`   |
+
+Each script builds the frontend bundle, starts the web server, and opens
+http://localhost:8080 in your browser once the server is ready. Press Ctrl+C in the
+window to stop the server. PostgreSQL must already be running.
+
+To run the steps by hand instead:
+
+```bash
 ./gradlew jsBrowserDevelopmentWebpack
 ./gradlew runServer
 ```
-
-Open http://localhost:8080
 
 ## Features
 
