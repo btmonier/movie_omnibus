@@ -6,310 +6,127 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import org.btmonier.database.GenreDao
+import org.btmonier.database.CategoryDao
+import org.btmonier.database.CategoryType
+import org.btmonier.database.RenameOutcome
 
+/**
+ * A category entry as the form selectors consume it: just an id and a name.
+ */
 @Serializable
-data class GenreRequest(
-    val name: String
-)
-
-@Serializable
-data class GenreResponse(
-    val id: Int,
-    val name: String
-)
-
-@Serializable
-data class SubgenreRequest(
-    val name: String
-)
-
-@Serializable
-data class SubgenreResponse(
-    val id: Int,
-    val name: String
-)
-
-@Serializable
-data class DistributorRequest(
-    val name: String
-)
-
-@Serializable
-data class DistributorResponse(
+data class NamedCategoryResponse(
     val id: Int,
     val name: String
 )
 
 /**
- * Configure genre and subgenre management API routes.
+ * Configure the name-only reference list routes used by the movie and physical
+ * media form selectors. These are thin wrappers over the shared category API;
+ * `/api/categories/{type}` additionally reports usage counts and can merge.
  */
-fun Route.genreRoutes(dao: GenreDao) {
+fun Route.genreRoutes(dao: CategoryDao) {
+    simpleCategoryRoutes(dao, CategoryType.GENRE, "Genre")
+    simpleCategoryRoutes(dao, CategoryType.SUBGENRE, "Subgenre")
+    simpleCategoryRoutes(dao, CategoryType.DISTRIBUTOR, "Distributor")
+}
 
-    route("/api/genres") {
+/**
+ * CRUD over one category type, responding with plain {id, name} objects.
+ */
+private fun Route.simpleCategoryRoutes(dao: CategoryDao, type: CategoryType, label: String) {
 
-        // GET /api/genres - Get all genres
+    route("/api/${type.slug}") {
+
+        // GET - Get all entries
         get {
-            val genres = dao.getAllGenres()
-            val response = genres.map { GenreResponse(it.id, it.name) }
-            call.respond(HttpStatusCode.OK, response)
+            call.respond(HttpStatusCode.OK, dao.list(type).map { NamedCategoryResponse(it.id, it.name) })
         }
 
-        // GET /api/genres/{id} - Get a specific genre by ID
+        // GET /{id} - Get a specific entry by ID
         get("/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
             if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid genre ID"))
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid $label ID"))
                 return@get
             }
 
-            val genre = dao.getGenreById(id)
-            if (genre != null) {
-                call.respond(HttpStatusCode.OK, GenreResponse(genre.id, genre.name))
+            val entry = dao.get(type, id)
+            if (entry != null) {
+                call.respond(HttpStatusCode.OK, NamedCategoryResponse(entry.id, entry.name))
             } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Genre not found"))
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "$label not found"))
             }
         }
 
-        // POST /api/genres - Create a new genre
+        // POST - Create a new entry
         post {
             try {
-                val request = call.receive<GenreRequest>()
+                val request = call.receive<CategoryRequest>()
 
                 if (request.name.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Genre name is required"))
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "$label name is required"))
                     return@post
                 }
 
-                val genreId = dao.createGenre(request.name)
-                if (genreId != null) {
-                    val genre = dao.getGenreById(genreId)
-                    if (genre != null) {
-                        call.respond(HttpStatusCode.Created, GenreResponse(genre.id, genre.name))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to create genre"))
-                    }
+                val created = dao.create(type, request.name)
+                if (created != null) {
+                    call.respond(HttpStatusCode.Created, NamedCategoryResponse(created.id, created.name))
                 } else {
-                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "Genre already exists"))
+                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "$label already exists"))
                 }
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
             }
         }
 
-        // PUT /api/genres/{id} - Update a genre name
+        // PUT /{id} - Rename an entry, which updates every movie that uses it
         put("/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
             if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid genre ID"))
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid $label ID"))
                 return@put
             }
 
             try {
-                val request = call.receive<GenreRequest>()
+                val request = call.receive<CategoryRequest>()
 
                 if (request.name.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Genre name is required"))
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "$label name is required"))
                     return@put
                 }
 
-                val success = dao.updateGenre(id, request.name)
-                if (success) {
-                    val genre = dao.getGenreById(id)
-                    if (genre != null) {
-                        call.respond(HttpStatusCode.OK, GenreResponse(genre.id, genre.name))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to update genre"))
-                    }
-                } else {
-                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "Genre not found"))
+                when (val outcome = dao.rename(type, id, request.name)) {
+                    is RenameOutcome.Renamed ->
+                        call.respond(HttpStatusCode.OK, NamedCategoryResponse(outcome.entry.id, outcome.entry.name))
+
+                    is RenameOutcome.Merged ->
+                        call.respond(HttpStatusCode.OK, NamedCategoryResponse(outcome.entry.id, outcome.entry.name))
+
+                    is RenameOutcome.NameTaken -> call.respond(
+                        HttpStatusCode.Conflict,
+                        mapOf("error" to "$label \"${outcome.existing.name}\" already exists")
+                    )
+
+                    RenameOutcome.NotFound ->
+                        call.respond(HttpStatusCode.NotFound, mapOf("error" to "$label not found"))
                 }
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
             }
         }
 
-        // DELETE /api/genres/{id} - Delete a genre
+        // DELETE /{id} - Delete an entry
         delete("/{id}") {
             val id = call.parameters["id"]?.toIntOrNull()
             if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid genre ID"))
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid $label ID"))
                 return@delete
             }
 
-            val success = dao.deleteGenre(id)
-            if (success) {
-                call.respond(HttpStatusCode.OK, mapOf("message" to "Genre deleted successfully"))
+            if (dao.delete(type, id)) {
+                call.respond(HttpStatusCode.OK, mapOf("message" to "$label deleted successfully"))
             } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Genre not found"))
-            }
-        }
-    }
-
-    route("/api/subgenres") {
-
-        // GET /api/subgenres - Get all subgenres
-        get {
-            val subgenres = dao.getAllSubgenres()
-            val response = subgenres.map { SubgenreResponse(it.id, it.name) }
-            call.respond(HttpStatusCode.OK, response)
-        }
-
-        // GET /api/subgenres/{id} - Get a specific subgenre by ID
-        get("/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-            if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid subgenre ID"))
-                return@get
-            }
-
-            val subgenre = dao.getSubgenreById(id)
-            if (subgenre != null) {
-                call.respond(HttpStatusCode.OK, SubgenreResponse(subgenre.id, subgenre.name))
-            } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subgenre not found"))
-            }
-        }
-
-        // POST /api/subgenres - Create a new subgenre
-        post {
-            try {
-                val request = call.receive<SubgenreRequest>()
-
-                if (request.name.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Subgenre name is required"))
-                    return@post
-                }
-
-                val subgenreId = dao.createSubgenre(request.name)
-                if (subgenreId != null) {
-                    val subgenre = dao.getSubgenreById(subgenreId)
-                    if (subgenre != null) {
-                        call.respond(HttpStatusCode.Created, SubgenreResponse(subgenre.id, subgenre.name))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to create subgenre"))
-                    }
-                } else {
-                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "Subgenre already exists"))
-                }
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
-            }
-        }
-
-        // PUT /api/subgenres/{id} - Update a subgenre name
-        put("/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-            if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid subgenre ID"))
-                return@put
-            }
-
-            try {
-                val request = call.receive<SubgenreRequest>()
-
-                if (request.name.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Subgenre name is required"))
-                    return@put
-                }
-
-                val success = dao.updateSubgenre(id, request.name)
-                if (success) {
-                    val subgenre = dao.getSubgenreById(id)
-                    if (subgenre != null) {
-                        call.respond(HttpStatusCode.OK, SubgenreResponse(subgenre.id, subgenre.name))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to update subgenre"))
-                    }
-                } else {
-                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subgenre not found"))
-                }
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
-            }
-        }
-
-        // DELETE /api/subgenres/{id} - Delete a subgenre
-        delete("/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-            if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid subgenre ID"))
-                return@delete
-            }
-
-            val success = dao.deleteSubgenre(id)
-            if (success) {
-                call.respond(HttpStatusCode.OK, mapOf("message" to "Subgenre deleted successfully"))
-            } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Subgenre not found"))
-            }
-        }
-    }
-
-    route("/api/distributors") {
-
-        // GET /api/distributors - Get all distributors
-        get {
-            val distributors = dao.getAllDistributors()
-            val response = distributors.map { DistributorResponse(it.id, it.name) }
-            call.respond(HttpStatusCode.OK, response)
-        }
-
-        // GET /api/distributors/{id} - Get a specific distributor by ID
-        get("/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-            if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid distributor ID"))
-                return@get
-            }
-
-            val distributor = dao.getDistributorById(id)
-            if (distributor != null) {
-                call.respond(HttpStatusCode.OK, DistributorResponse(distributor.id, distributor.name))
-            } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Distributor not found"))
-            }
-        }
-
-        // POST /api/distributors - Create a new distributor
-        post {
-            try {
-                val request = call.receive<DistributorRequest>()
-
-                if (request.name.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Distributor name is required"))
-                    return@post
-                }
-
-                val distributorId = dao.createDistributor(request.name)
-                if (distributorId != null) {
-                    val distributor = dao.getDistributorById(distributorId)
-                    if (distributor != null) {
-                        call.respond(HttpStatusCode.Created, DistributorResponse(distributor.id, distributor.name))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to create distributor"))
-                    }
-                } else {
-                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "Distributor already exists"))
-                }
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
-            }
-        }
-
-        // DELETE /api/distributors/{id} - Delete a distributor
-        delete("/{id}") {
-            val id = call.parameters["id"]?.toIntOrNull()
-            if (id == null) {
-                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid distributor ID"))
-                return@delete
-            }
-
-            val success = dao.deleteDistributor(id)
-            if (success) {
-                call.respond(HttpStatusCode.OK, mapOf("message" to "Distributor deleted successfully"))
-            } else {
-                call.respond(HttpStatusCode.NotFound, mapOf("error" to "Distributor not found"))
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "$label not found"))
             }
         }
     }

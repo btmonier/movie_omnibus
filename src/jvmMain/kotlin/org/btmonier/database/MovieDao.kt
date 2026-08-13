@@ -15,8 +15,7 @@ import java.time.LocalDate
 class MovieDao(gcsService: GcsService? = null) {
     private val physicalMediaDao = PhysicalMediaDao(gcsService)
     private val watchedDao = WatchedDao()
-    private val genreDao = GenreDao()
-    private val collectionDao = CollectionDao()
+    private val categoryDao = CategoryDao()
 
     /**
      * Get all movies from the database.
@@ -122,12 +121,19 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by country
         if (!country.isNullOrBlank()) {
-            val movieIdsWithCountry = MovieCountries.selectAll()
-                .where { MovieCountries.country eq country }
-                .map { it[MovieCountries.movieId].value }
-                .toSet()
+            val countryRow = Countries.selectAll().where { Countries.name eq country }.singleOrNull()
+            if (countryRow != null) {
+                val countryId = countryRow[Countries.id].value
+                val movieIdsWithCountry = MovieCountries.selectAll()
+                    .where { MovieCountries.countryId eq countryId }
+                    .map { it[MovieCountries.movieId].value }
+                    .toSet()
 
-            candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithCountry) ?: movieIdsWithCountry
+                candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithCountry) ?: movieIdsWithCountry
+            } else {
+                // Country not found, return empty results
+                return@dbQuery Pair(emptyList(), 0)
+            }
         }
 
         // Filter by media type
@@ -265,7 +271,14 @@ class MovieDao(gcsService: GcsService? = null) {
      * Filter movies by country.
      */
     suspend fun getMoviesByCountry(country: String): List<MovieMetadata> = DatabaseFactory.dbQuery {
-        val movieIds = MovieCountries.selectAll().where { MovieCountries.country eq country }
+        // Find the country ID
+        val countryRow = Countries.selectAll().where { Countries.name eq country }.singleOrNull()
+        if (countryRow == null) {
+            return@dbQuery emptyList()
+        }
+        val countryId = countryRow[Countries.id].value
+
+        val movieIds = MovieCountries.selectAll().where { MovieCountries.countryId eq countryId }
             .map { it[MovieCountries.movieId].value }
 
         Movies.selectAll().where { Movies.id inList movieIds }
@@ -403,13 +416,15 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     /**
-     * Get all unique countries from the database (for filtering).
+     * Get all unique countries from the database that are assigned to at least one movie (for filtering).
      */
     suspend fun getAllCountries(): List<String> = DatabaseFactory.dbQuery {
-        MovieCountries.selectAll()
-            .map { it[MovieCountries.country] }
-            .distinct()
-            .sorted()
+        // Use JOIN with DISTINCT at SQL level for efficiency
+        (Countries innerJoin MovieCountries)
+            .select(Countries.name)
+            .withDistinct()
+            .orderBy(Countries.name to SortOrder.ASC)
+            .map { it[Countries.name] }
     }
 
     /**
@@ -503,8 +518,16 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by countries if specified (OR logic)
         if (countries.isNotEmpty()) {
+            val countryIds = Countries.selectAll()
+                .where { Countries.name inList countries }
+                .map { it[Countries.id].value }
+
+            if (countryIds.isEmpty()) {
+                return@dbQuery null // No matching countries found
+            }
+
             val movieIdsWithCountries = MovieCountries.selectAll()
-                .where { MovieCountries.country inList countries }
+                .where { MovieCountries.countryId inList countryIds }
                 .map { it[MovieCountries.movieId].value }
                 .toSet()
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountries)
@@ -608,8 +631,16 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by countries if specified (OR logic)
         if (countries.isNotEmpty()) {
+            val countryIds = Countries.selectAll()
+                .where { Countries.name inList countries }
+                .map { it[Countries.id].value }
+
+            if (countryIds.isEmpty()) {
+                return@dbQuery 0
+            }
+
             val movieIdsWithCountries = MovieCountries.selectAll()
-                .where { MovieCountries.country inList countries }
+                .where { MovieCountries.countryId inList countryIds }
                 .map { it[MovieCountries.movieId].value }
                 .toSet()
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithCountries)
@@ -643,10 +674,10 @@ class MovieDao(gcsService: GcsService? = null) {
         }
     }
 
-    private suspend fun insertGenres(movieId: Int, genres: List<String>) {
+    private fun insertGenres(movieId: Int, genres: List<String>) {
         genres.forEach { genreName ->
             // Get or create the genre
-            val genreId = genreDao.getOrCreateGenre(genreName)
+            val genreId = categoryDao.getOrCreateInTransaction(CategoryType.GENRE, genreName)
             MovieGenres.insert {
                 it[MovieGenres.movieId] = movieId
                 it[MovieGenres.genreId] = genreId
@@ -654,10 +685,10 @@ class MovieDao(gcsService: GcsService? = null) {
         }
     }
 
-    private suspend fun insertSubgenres(movieId: Int, subgenres: List<String>) {
+    private fun insertSubgenres(movieId: Int, subgenres: List<String>) {
         subgenres.forEach { subgenreName ->
             // Get or create the subgenre
-            val subgenreId = genreDao.getOrCreateSubgenre(subgenreName)
+            val subgenreId = categoryDao.getOrCreateInTransaction(CategoryType.SUBGENRE, subgenreName)
             MovieSubgenres.insert {
                 it[MovieSubgenres.movieId] = movieId
                 it[MovieSubgenres.subgenreId] = subgenreId
@@ -665,10 +696,10 @@ class MovieDao(gcsService: GcsService? = null) {
         }
     }
 
-    private suspend fun insertCollections(movieId: Int, collections: List<String>) {
+    private fun insertCollections(movieId: Int, collections: List<String>) {
         collections.forEach { collectionName ->
             // Get or create the collection
-            val collectionId = collectionDao.getOrCreateCollection(collectionName)
+            val collectionId = categoryDao.getOrCreateInTransaction(CategoryType.COLLECTION, collectionName)
             MovieCollections.insert {
                 it[MovieCollections.movieId] = movieId
                 it[MovieCollections.collectionId] = collectionId
@@ -677,19 +708,23 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     private fun insertThemes(movieId: Int, themes: List<String>) {
-        themes.forEach { theme ->
+        themes.forEach { themeName ->
+            // Get or create the theme
+            val themeId = categoryDao.getOrCreateInTransaction(CategoryType.THEME, themeName)
             MovieThemes.insert {
                 it[MovieThemes.movieId] = movieId
-                it[MovieThemes.theme] = theme
+                it[MovieThemes.themeId] = themeId
             }
         }
     }
 
     private fun insertCountries(movieId: Int, countries: List<String>) {
-        countries.forEach { country ->
+        countries.forEach { countryName ->
+            // Get or create the country
+            val countryId = categoryDao.getOrCreateInTransaction(CategoryType.COUNTRY, countryName)
             MovieCountries.insert {
                 it[MovieCountries.movieId] = movieId
-                it[MovieCountries.country] = country
+                it[MovieCountries.countryId] = countryId
             }
         }
     }
@@ -737,11 +772,15 @@ class MovieDao(gcsService: GcsService? = null) {
             .where { MovieCollections.movieId eq movieId }
             .map { it[Collections.name] }
 
-        val themes = MovieThemes.selectAll().where { MovieThemes.movieId eq movieId }
-            .map { it[MovieThemes.theme] }
+        val themes = (MovieThemes innerJoin Themes)
+            .select(Themes.name)
+            .where { MovieThemes.movieId eq movieId }
+            .map { it[Themes.name] }
 
-        val countries = MovieCountries.selectAll().where { MovieCountries.movieId eq movieId }
-            .map { it[MovieCountries.country] }
+        val countries = (MovieCountries innerJoin Countries)
+            .select(Countries.name)
+            .where { MovieCountries.movieId eq movieId }
+            .map { it[Countries.name] }
 
         val cast = MovieCast.selectAll().where { MovieCast.movieId eq movieId }
             .map { it[MovieCast.castMember] }

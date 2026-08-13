@@ -11,6 +11,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import org.w3c.fetch.RequestInit
+import org.w3c.fetch.Response
 
 val mainScope = MainScope()
 
@@ -362,22 +363,6 @@ suspend fun createSubgenre(name: String): SubgenreResponse {
     return Json.decodeFromString(json)
 }
 
-suspend fun deleteGenre(id: Int): Boolean {
-    val response = window.fetch("$API_BASE_URL/genres/$id", RequestInit(
-        method = "DELETE"
-    )).await()
-
-    return response.ok
-}
-
-suspend fun deleteSubgenre(id: Int): Boolean {
-    val response = window.fetch("$API_BASE_URL/subgenres/$id", RequestInit(
-        method = "DELETE"
-    )).await()
-
-    return response.ok
-}
-
 // ==================== Collection API ====================
 
 @kotlinx.serialization.Serializable
@@ -415,30 +400,6 @@ suspend fun createCollection(name: String, description: String? = null): Collect
     return Json.decodeFromString(json)
 }
 
-suspend fun updateCollection(id: Int, name: String, description: String? = null): CollectionResponse {
-    val response = window.fetch("$API_BASE_URL/collections/$id", RequestInit(
-        method = "PUT",
-        headers = js("({'Content-Type': 'application/json'})"),
-        body = Json.encodeToString(CollectionRequestBody.serializer(), CollectionRequestBody(name, description))
-    )).await()
-
-    if (!response.ok) {
-        val errorText = response.text().await()
-        throw Exception("Failed to update collection: $errorText")
-    }
-
-    val json = response.text().await()
-    return Json.decodeFromString(json)
-}
-
-suspend fun deleteCollection(id: Int): Boolean {
-    val response = window.fetch("$API_BASE_URL/collections/$id", RequestInit(
-        method = "DELETE"
-    )).await()
-
-    return response.ok
-}
-
 // ==================== Distributor API ====================
 
 @kotlinx.serialization.Serializable
@@ -464,12 +425,147 @@ suspend fun createDistributor(name: String): DistributorResponse {
     return Json.decodeFromString(json)
 }
 
-suspend fun deleteDistributor(id: Int): Boolean {
-    val response = window.fetch("$API_BASE_URL/distributors/$id", RequestInit(
+// ==================== Category Management API ====================
+
+@kotlinx.serialization.Serializable
+data class CategoryEntryResponse(
+    val id: Int,
+    val name: String,
+    val description: String? = null,
+    val usageCount: Int = 0
+)
+
+/**
+ * Result of creating, renaming, or merging a category entry. When [merged] is
+ * true the edit folded two entries into [entry].
+ */
+@kotlinx.serialization.Serializable
+data class CategorySaveResponse(
+    val entry: CategoryEntryResponse,
+    val merged: Boolean = false,
+    val mergedName: String? = null,
+    val moviesUpdated: Int = 0
+)
+
+@kotlinx.serialization.Serializable
+data class CategoryTypeSummary(
+    val type: String,
+    val label: String,
+    val entryCount: Int
+)
+
+@kotlinx.serialization.Serializable
+private data class CategoryRequestBody(
+    val name: String,
+    val description: String? = null
+)
+
+@kotlinx.serialization.Serializable
+private data class CategoryMergeRequestBody(
+    val sourceIds: List<Int>,
+    val targetId: Int
+)
+
+/**
+ * Get the available category types and how many entries each one holds.
+ */
+suspend fun fetchCategoryTypes(): List<CategoryTypeSummary> {
+    val response = window.fetch("$API_BASE_URL/categories").await()
+    if (!response.ok) {
+        throw Exception("Failed to load category types: ${response.text().await()}")
+    }
+    return Json.decodeFromString(response.text().await())
+}
+
+/**
+ * Get every entry of a category (genres, subgenres, collections, distributors,
+ * themes, countries) along with how many movies use it.
+ */
+suspend fun fetchCategoryEntries(type: String): List<CategoryEntryResponse> {
+    val response = window.fetch("$API_BASE_URL/categories/$type").await()
+    if (!response.ok) {
+        throw Exception("Failed to load $type: ${response.text().await()}")
+    }
+    return Json.decodeFromString(response.text().await())
+}
+
+suspend fun createCategoryEntry(type: String, name: String, description: String? = null): CategorySaveResponse {
+    val response = window.fetch("$API_BASE_URL/categories/$type", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(CategoryRequestBody.serializer(), CategoryRequestBody(name, description))
+    )).await()
+
+    if (!response.ok) {
+        throw Exception(response.categoryErrorMessage())
+    }
+
+    return Json.decodeFromString(CategorySaveResponse.serializer(), response.text().await())
+}
+
+/**
+ * Rename an entry, which updates every movie that references it. Set
+ * [allowMerge] to fold it into an existing entry that already has that name.
+ */
+suspend fun renameCategoryEntry(
+    type: String,
+    id: Int,
+    name: String,
+    description: String? = null,
+    allowMerge: Boolean = false
+): CategorySaveResponse {
+    val response = window.fetch("$API_BASE_URL/categories/$type/$id?allowMerge=$allowMerge", RequestInit(
+        method = "PUT",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(CategoryRequestBody.serializer(), CategoryRequestBody(name, description))
+    )).await()
+
+    if (!response.ok) {
+        throw Exception(response.categoryErrorMessage())
+    }
+
+    return Json.decodeFromString(CategorySaveResponse.serializer(), response.text().await())
+}
+
+/**
+ * Fold entries into a single surviving entry.
+ */
+suspend fun mergeCategoryEntries(type: String, sourceIds: List<Int>, targetId: Int): CategorySaveResponse {
+    val response = window.fetch("$API_BASE_URL/categories/$type/merge", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(
+            CategoryMergeRequestBody.serializer(),
+            CategoryMergeRequestBody(sourceIds, targetId)
+        )
+    )).await()
+
+    if (!response.ok) {
+        throw Exception(response.categoryErrorMessage())
+    }
+
+    return Json.decodeFromString(CategorySaveResponse.serializer(), response.text().await())
+}
+
+suspend fun deleteCategoryEntry(type: String, id: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/categories/$type/$id", RequestInit(
         method = "DELETE"
     )).await()
 
     return response.ok
+}
+
+/**
+ * Pull the "error" field out of a failed category response, falling back to the
+ * raw body when it is not shaped as expected.
+ */
+private suspend fun Response.categoryErrorMessage(): String {
+    val body = text().await()
+    return try {
+        Json.parseToJsonElement(body).jsonObject["error"]?.jsonPrimitive?.content ?: body
+    } catch (e: Exception) {
+        body
+    }
 }
 
 // ==================== Scraping API ====================

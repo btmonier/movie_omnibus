@@ -3,6 +3,7 @@ package org.btmonier.database
 import org.btmonier.MediaType
 import org.btmonier.PhysicalMediaImage
 import org.btmonier.storage.GcsService
+import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import java.time.LocalDate
@@ -15,6 +16,7 @@ import org.btmonier.PhysicalMedia as PhysicalMediaEntity
  *                   If null, image URLs are returned as-is from the database.
  */
 class PhysicalMediaDao(private val gcsService: GcsService? = null) {
+    private val categoryDao = CategoryDao()
 
     /**
      * Get all physical media entries for a specific movie.
@@ -56,11 +58,13 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
      * Create a new physical media entry for a movie.
      */
     suspend fun createPhysicalMedia(movieId: Int, physicalMedia: PhysicalMediaEntity): Int = DatabaseFactory.dbQuery {
+        val distributor = resolveDistributor(physicalMedia.distributor)
+
         val mediaId = PhysicalMedia.insertAndGetId {
             it[PhysicalMedia.movieId] = movieId
             it[entryLetter] = physicalMedia.entryLetter
             it[title] = physicalMedia.title
-            it[distributor] = physicalMedia.distributor
+            it[distributorId] = distributor
             it[releaseDate] = physicalMedia.releaseDate?.let { date -> LocalDate.parse(date) }
             it[blurayComUrl] = physicalMedia.blurayComUrl
             it[location] = physicalMedia.location
@@ -79,10 +83,12 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
      * Update an existing physical media entry.
      */
     suspend fun updatePhysicalMedia(id: Int, physicalMedia: PhysicalMediaEntity): Boolean = DatabaseFactory.dbQuery {
+        val distributor = resolveDistributor(physicalMedia.distributor)
+
         val updated = PhysicalMedia.update({ PhysicalMedia.id eq id }) {
             it[entryLetter] = physicalMedia.entryLetter
             it[title] = physicalMedia.title
-            it[distributor] = physicalMedia.distributor
+            it[distributorId] = distributor
             it[releaseDate] = physicalMedia.releaseDate?.let { date -> LocalDate.parse(date) }
             it[blurayComUrl] = physicalMedia.blurayComUrl
             it[location] = physicalMedia.location
@@ -155,9 +161,24 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
         }
     }
 
+    /**
+     * Resolve a distributor name to its entry in the global distributors list,
+     * adding it when it is new. Blank names mean "no distributor".
+     */
+    private fun resolveDistributor(name: String?): EntityID<Int>? =
+        name?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { EntityID(categoryDao.getOrCreateInTransaction(CategoryType.DISTRIBUTOR, it), Distributors) }
+
     // Helper function to convert a database row to PhysicalMedia
     private fun rowToPhysicalMedia(row: ResultRow): PhysicalMediaEntity {
         val mediaId = row[PhysicalMedia.id].value
+
+        val distributorName = row[PhysicalMedia.distributorId]?.let { distributorId ->
+            Distributors.selectAll().where { Distributors.id eq distributorId.value }
+                .map { it[Distributors.name] }
+                .singleOrNull()
+        }
 
         val mediaTypes = PhysicalMediaTypes.selectAll().where { PhysicalMediaTypes.physicalMediaId eq mediaId }
             .map { stringToMediaType(it[PhysicalMediaTypes.mediaType]) }
@@ -178,7 +199,7 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
             mediaTypes = mediaTypes,
             entryLetter = row[PhysicalMedia.entryLetter],
             title = row[PhysicalMedia.title],
-            distributor = row[PhysicalMedia.distributor],
+            distributor = distributorName,
             releaseDate = row[PhysicalMedia.releaseDate]?.toString(),
             blurayComUrl = row[PhysicalMedia.blurayComUrl],
             location = row[PhysicalMedia.location],

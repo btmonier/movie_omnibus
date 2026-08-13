@@ -6,13 +6,10 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import org.btmonier.database.CollectionDao
-
-@Serializable
-data class CollectionRequest(
-    val name: String,
-    val description: String? = null
-)
+import org.btmonier.database.CategoryDao
+import org.btmonier.database.CategoryEntry
+import org.btmonier.database.CategoryType
+import org.btmonier.database.RenameOutcome
 
 @Serializable
 data class CollectionResponse(
@@ -21,18 +18,19 @@ data class CollectionResponse(
     val description: String? = null
 )
 
+private fun CategoryEntry.toCollectionResponse() = CollectionResponse(id, name, description)
+
 /**
- * Configure collection management API routes.
+ * Configure collection routes used by the movie form selector. Collections are
+ * a category type like any other, but they also carry a description.
  */
-fun Route.collectionRoutes(dao: CollectionDao) {
+fun Route.collectionRoutes(dao: CategoryDao) {
 
     route("/api/collections") {
 
         // GET /api/collections - Get all collections
         get {
-            val collections = dao.getAllCollections()
-            val response = collections.map { CollectionResponse(it.id, it.name, it.description) }
-            call.respond(HttpStatusCode.OK, response)
+            call.respond(HttpStatusCode.OK, dao.list(CategoryType.COLLECTION).map { it.toCollectionResponse() })
         }
 
         // GET /api/collections/{id} - Get a specific collection by ID
@@ -43,9 +41,9 @@ fun Route.collectionRoutes(dao: CollectionDao) {
                 return@get
             }
 
-            val collection = dao.getCollectionById(id)
+            val collection = dao.get(CategoryType.COLLECTION, id)
             if (collection != null) {
-                call.respond(HttpStatusCode.OK, CollectionResponse(collection.id, collection.name, collection.description))
+                call.respond(HttpStatusCode.OK, collection.toCollectionResponse())
             } else {
                 call.respond(HttpStatusCode.NotFound, mapOf("error" to "Collection not found"))
             }
@@ -54,21 +52,20 @@ fun Route.collectionRoutes(dao: CollectionDao) {
         // POST /api/collections - Create a new collection
         post {
             try {
-                val request = call.receive<CollectionRequest>()
+                val request = call.receive<CategoryRequest>()
 
                 if (request.name.isBlank()) {
                     call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Collection name is required"))
                     return@post
                 }
 
-                val collectionId = dao.createCollection(request.name, request.description?.takeIf { it.isNotBlank() })
-                if (collectionId != null) {
-                    val collection = dao.getCollectionById(collectionId)
-                    if (collection != null) {
-                        call.respond(HttpStatusCode.Created, CollectionResponse(collection.id, collection.name, collection.description))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to create collection"))
-                    }
+                val created = dao.create(
+                    CategoryType.COLLECTION,
+                    request.name,
+                    request.description?.takeIf { it.isNotBlank() }
+                )
+                if (created != null) {
+                    call.respond(HttpStatusCode.Created, created.toCollectionResponse())
                 } else {
                     call.respond(HttpStatusCode.Conflict, mapOf("error" to "Collection already exists"))
                 }
@@ -86,23 +83,34 @@ fun Route.collectionRoutes(dao: CollectionDao) {
             }
 
             try {
-                val request = call.receive<CollectionRequest>()
+                val request = call.receive<CategoryRequest>()
 
                 if (request.name.isBlank()) {
                     call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Collection name is required"))
                     return@put
                 }
 
-                val success = dao.updateCollection(id, request.name, request.description?.takeIf { it.isNotBlank() })
-                if (success) {
-                    val collection = dao.getCollectionById(id)
-                    if (collection != null) {
-                        call.respond(HttpStatusCode.OK, CollectionResponse(collection.id, collection.name, collection.description))
-                    } else {
-                        call.respond(HttpStatusCode.InternalServerError, mapOf("error" to "Failed to update collection"))
-                    }
-                } else {
-                    call.respond(HttpStatusCode.NotFound, mapOf("error" to "Collection not found"))
+                val outcome = dao.rename(
+                    type = CategoryType.COLLECTION,
+                    id = id,
+                    newName = request.name,
+                    description = request.description?.takeIf { it.isNotBlank() }
+                )
+
+                when (outcome) {
+                    is RenameOutcome.Renamed ->
+                        call.respond(HttpStatusCode.OK, outcome.entry.toCollectionResponse())
+
+                    is RenameOutcome.Merged ->
+                        call.respond(HttpStatusCode.OK, outcome.entry.toCollectionResponse())
+
+                    is RenameOutcome.NameTaken -> call.respond(
+                        HttpStatusCode.Conflict,
+                        mapOf("error" to "Collection \"${outcome.existing.name}\" already exists")
+                    )
+
+                    RenameOutcome.NotFound ->
+                        call.respond(HttpStatusCode.NotFound, mapOf("error" to "Collection not found"))
                 }
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
@@ -117,8 +125,7 @@ fun Route.collectionRoutes(dao: CollectionDao) {
                 return@delete
             }
 
-            val success = dao.deleteCollection(id)
-            if (success) {
+            if (dao.delete(CategoryType.COLLECTION, id)) {
                 call.respond(HttpStatusCode.OK, mapOf("message" to "Collection deleted successfully"))
             } else {
                 call.respond(HttpStatusCode.NotFound, mapOf("error" to "Collection not found"))

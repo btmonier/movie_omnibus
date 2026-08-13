@@ -247,7 +247,7 @@ class MovieTable(private val container: Element) {
                                     overflow: hidden;
                                 """.trimIndent()
                                 
-                                // Genres option
+                                // Categories option
                                 a {
                                     style = """
                                         display: flex;
@@ -268,43 +268,13 @@ class MovieTable(private val container: Element) {
                                         e.preventDefault()
                                         editToolsDropdownOpen = false
                                         updateEditToolsDropdown()
-                                        showGenreManagement()
+                                        showCategoryManagement()
                                     }
                                     span {
                                         classes = setOf("mdi", "mdi-tag-multiple")
                                         style = "font-size: 18px;"
                                     }
-                                    span { +"Manage Genres" }
-                                }
-
-                                // Collections option
-                                a {
-                                    style = """
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 10px;
-                                        padding: 12px 16px;
-                                        font-size: 14px;
-                                        font-weight: 500;
-                                        cursor: pointer;
-                                        color: #e0e0e0;
-                                        text-decoration: none;
-                                        transition: all 0.2s;
-                                        border-bottom: 1px solid rgba(255,255,255,0.1);
-                                    """.trimIndent()
-                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
-                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
-                                    onClickFunction = { e ->
-                                        e.preventDefault()
-                                        editToolsDropdownOpen = false
-                                        updateEditToolsDropdown()
-                                        showCollectionManagement()
-                                    }
-                                    span {
-                                        classes = setOf("mdi", "mdi-bookmark-multiple")
-                                        style = "font-size: 18px;"
-                                    }
-                                    span { +"Manage Collections" }
+                                    span { +"Manage Categories" }
                                 }
                                 
                                 // Add Movie option
@@ -2175,28 +2145,16 @@ class MovieTable(private val container: Element) {
         }
     }
 
-    private fun showGenreManagement() {
-        val genreManagementUI = GenreManagementUI(container) {
-            // On close, refresh filter options and data
+    private fun showCategoryManagement() {
+        val categoryManagementUI = CategoryManagementUI(container) {
+            // On close, refresh filter options and data - renames and merges change both
             mainScope.launch {
                 loadFilterOptions()
                 renderFilters()
                 loadMovies()
             }
         }
-        genreManagementUI.show()
-    }
-
-    private fun showCollectionManagement() {
-        val collectionManagementUI = CollectionManagementUI(container) {
-            // On close, refresh filter options and data
-            mainScope.launch {
-                loadFilterOptions()
-                renderFilters()
-                loadMovies()
-            }
-        }
-        collectionManagementUI.show()
+        categoryManagementUI.show()
     }
 
     private fun showRandomPicker() {

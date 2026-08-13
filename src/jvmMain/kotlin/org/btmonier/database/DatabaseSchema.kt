@@ -57,6 +57,20 @@ object Distributors : IntIdTable("distributors") {
 }
 
 /**
+ * Global themes table - master list of all available themes
+ */
+object Themes : IntIdTable("themes") {
+    val name = varchar("name", 200).uniqueIndex()
+}
+
+/**
+ * Global countries table - master list of all available countries
+ */
+object Countries : IntIdTable("countries") {
+    val name = varchar("name", 200).uniqueIndex()
+}
+
+/**
  * Table for movie genres (many-to-many relationship)
  * Links movies to genres from the global Genres table
  */
@@ -85,18 +99,20 @@ object MovieCollections : IntIdTable("movie_collections") {
 
 /**
  * Table for movie themes (many-to-many relationship)
+ * Links movies to themes from the global Themes table
  */
 object MovieThemes : IntIdTable("movie_themes") {
     val movieId = reference("movie_id", Movies)
-    val theme = varchar("theme", 200)
+    val themeId = reference("theme_id", Themes)
 }
 
 /**
  * Table for movie countries (many-to-many relationship)
+ * Links movies to countries from the global Countries table
  */
 object MovieCountries : IntIdTable("movie_countries") {
     val movieId = reference("movie_id", Movies)
-    val country = varchar("country", 200)
+    val countryId = reference("country_id", Countries)
 }
 
 /**
@@ -123,7 +139,7 @@ object PhysicalMedia : IntIdTable("physical_media") {
     val movieId = reference("movie_id", Movies)
     val entryLetter = varchar("entry_letter", 1).nullable() // A-Z identifier
     val title = varchar("title", 500).nullable() // Optional title (useful for box sets)
-    val distributor = varchar("distributor", 200).nullable()
+    val distributorId = optReference("distributor_id", Distributors)
     val releaseDate = date("release_date").nullable()
     val blurayComUrl = varchar("bluray_com_url", 500).nullable()
     val location = varchar("location", 50).nullable() // Archive, Shelf

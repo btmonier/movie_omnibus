@@ -83,6 +83,8 @@ object DatabaseFactory {
                 Subgenres,
                 Collections,
                 Distributors,
+                Themes,
+                Countries,
                 MovieGenres,
                 MovieSubgenres,
                 MovieCollections,
@@ -96,6 +98,9 @@ object DatabaseFactory {
                 WatchedEntries
             )
         }
+
+        // Convert any remaining inline category strings into lookup table references
+        CategoryMigration.migrateCategoriesToLookupTables(database)
     }
 
     private fun createHikariDataSource(

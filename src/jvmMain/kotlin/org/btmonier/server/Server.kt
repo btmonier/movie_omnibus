@@ -14,9 +14,8 @@ import io.ktor.server.routing.*
 import io.ktor.server.http.content.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import org.btmonier.database.CollectionDao
+import org.btmonier.database.CategoryDao
 import org.btmonier.database.DatabaseFactory
-import org.btmonier.database.GenreDao
 import org.btmonier.database.MovieDao
 import org.btmonier.database.PhysicalMediaDao
 import org.btmonier.storage.GcsService
@@ -148,8 +147,7 @@ fun Application.configureServer() {
     // Initialize DAOs with GCS service for URL signing
     val movieDao = MovieDao(gcsService)
     val physicalMediaDao = PhysicalMediaDao(gcsService)
-    val genreDao = GenreDao()
-    val collectionDao = CollectionDao()
+    val categoryDao = CategoryDao()
 
     // Configure JSON serialization
     install(ContentNegotiation) {
@@ -211,8 +209,9 @@ fun Application.configureServer() {
         movieRoutes(movieDao)
         physicalMediaRoutes(movieDao, physicalMediaDao)
         watchedRoutes()
-        genreRoutes(genreDao)
-        collectionRoutes(collectionDao)
+        genreRoutes(categoryDao)
+        collectionRoutes(categoryDao)
+        categoryRoutes(categoryDao)
 
         // Health check endpoint
         get("/health") {
@@ -244,7 +243,13 @@ fun Application.configureServer() {
                     "PUT /api/watched/{id} - Update watched entry",
                     "DELETE /api/watched/{id} - Delete watched entry",
                     "GET /api/movies/{id}/rating/average - Get average rating for movie",
-                    "GET /api/movies/{id}/watch-count - Get watch count for movie"
+                    "GET /api/movies/{id}/watch-count - Get watch count for movie",
+                    "GET /api/categories - List category types and entry counts",
+                    "GET /api/categories/{type} - List entries of a category with usage counts",
+                    "POST /api/categories/{type} - Create a category entry",
+                    "PUT /api/categories/{type}/{id} - Rename an entry (?allowMerge=true to merge)",
+                    "POST /api/categories/{type}/merge - Merge entries into one",
+                    "DELETE /api/categories/{type}/{id} - Delete a category entry"
                 )
             ))
         }

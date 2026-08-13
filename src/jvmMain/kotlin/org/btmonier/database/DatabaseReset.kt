@@ -60,6 +60,8 @@ class DatabaseReset : CliktCommand(name = "reset-database") {
                 Movies,
                 MovieAlternateTitles,
                 Collections,
+                Themes,
+                Countries,
                 MovieGenres,
                 MovieSubgenres,
                 MovieCollections,
