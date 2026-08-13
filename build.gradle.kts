@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "org.btmonier"
-version = "0.4.0"
+version = "0.5.0"
 
 repositories {
     mavenCentral()
@@ -228,6 +228,25 @@ tasks.register<JavaExec>("backfillCastCrew") {
 
     // Allow passing arguments from command line
     // Usage: ./gradlew backfillCastCrew --args="--dry-run --limit 5"
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
+// Custom task for converting inline category strings into lookup table references
+tasks.register<JavaExec>("migrateCategories") {
+    group = "application"
+    description = "Move themes, countries, and physical media distributors into lookup tables"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.database.CategoryMigrationKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Usage: ./gradlew migrateCategories
     if (project.hasProperty("args")) {
         args(project.property("args").toString().split(" "))
     }
