@@ -103,6 +103,34 @@ class MovieMetadataTest {
     }
 
     @Test
+    fun `PhysicalMedia round-trips the collection flag`() {
+        val media = PhysicalMedia(
+            mediaTypes = listOf(MediaType.BLURAY),
+            title = "Blood Money: Four Classic Westerns",
+            isCollection = true
+        )
+
+        val decoded = Json.decodeFromString<PhysicalMedia>(json.encodeToString(media))
+
+        assertTrue(decoded.isCollection)
+        assertEquals(media.title, decoded.title)
+    }
+
+    @Test
+    fun `PhysicalMedia without a collection flag defaults to false`() {
+        val jsonString = """
+            {
+                "mediaTypes": ["DVD"],
+                "title": "Single Feature"
+            }
+        """.trimIndent()
+
+        val media = Json.decodeFromString<PhysicalMedia>(jsonString)
+
+        assertEquals(false, media.isCollection)
+    }
+
+    @Test
     fun `MovieMetadata handles special characters in text`() {
         val metadata = MovieMetadata(
             url = "https://letterboxd.com/film/amélie/",

@@ -16,7 +16,8 @@ object SchemaMigration {
     private data class AdditiveColumn(val table: String, val column: String, val type: String)
 
     private val additiveColumns = listOf(
-        AdditiveColumn("physical_media", "alternate_title", "varchar(500)")
+        AdditiveColumn("physical_media", "alternate_title", "varchar(500)"),
+        AdditiveColumn("physical_media", "is_collection", "boolean")
     )
 
     fun addMissingColumns(database: Database? = null) {

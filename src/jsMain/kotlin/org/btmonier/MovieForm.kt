@@ -404,6 +404,12 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                                     td {
                                         style = "padding: 10px 12px; color: #202124;"
                                         +(media.title ?: "—")
+                                        if (media.isCollection) {
+                                            span {
+                                                style = "display: inline-block; padding: 4px 10px; margin-left: 6px; background-color: #ede7f6; color: #4527a0; border-radius: 12px; font-size: 12px; font-weight: 500;"
+                                                +"Collection"
+                                            }
+                                        }
                                         if (!media.alternateTitle.isNullOrBlank()) {
                                             div {
                                                 style = "margin-top: 2px; color: #5f6368; font-size: 12px; font-style: italic;"

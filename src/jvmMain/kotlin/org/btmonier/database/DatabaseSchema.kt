@@ -140,6 +140,9 @@ object PhysicalMedia : IntIdTable("physical_media") {
     val entryLetter = varchar("entry_letter", 1).nullable() // A-Z identifier
     val title = varchar("title", 500).nullable() // Optional title (useful for box sets)
     val alternateTitle = varchar("alternate_title", 500).nullable() // Title this film carries on this release
+    // Unit holds 2+ films (box set, multi-feature disc). Nullable so it can be
+    // added to existing tables by SchemaMigration; null reads as false.
+    val isCollection = bool("is_collection").nullable()
     val distributorId = optReference("distributor_id", Distributors)
     val releaseDate = date("release_date").nullable()
     val blurayComUrl = varchar("bluray_com_url", 500).nullable()

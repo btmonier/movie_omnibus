@@ -243,6 +243,31 @@ class PhysicalMediaForm(
             }
         }
 
+        // Collection flag
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                style = """
+                    display: flex;
+                    align-items: center;
+                    cursor: pointer;
+                    font-size: 14px;
+                    color: #202124;
+                """.trimIndent()
+
+                input(type = InputType.checkBox) {
+                    id = "physical-media-form-is-collection"
+                    checked = media?.isCollection == true
+                    style = "margin-right: 8px; cursor: pointer;"
+                }
+                +"Collection"
+            }
+            div {
+                style = "margin-top: 4px; margin-left: 24px; font-size: 12px; color: #5f6368;"
+                +"This unit contains 2 or more films (e.g., a box set)"
+            }
+        }
+
         // Distributor Selector Container
         div {
             id = "distributor-selector-container"
@@ -745,6 +770,9 @@ class PhysicalMediaForm(
             val alternateTitle = (document.getElementById("physical-media-form-alternate-title") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
 
+            val isCollection = (document.getElementById("physical-media-form-is-collection") as? HTMLInputElement)
+                ?.checked == true
+
             val distributor = selectedDistributor?.trim()?.takeIf { it.isNotBlank() }
             val releaseDate = (document.getElementById("physical-media-form-release-date") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
@@ -772,6 +800,7 @@ class PhysicalMediaForm(
                 entryLetter = entryLetter,
                 title = title,
                 alternateTitle = alternateTitle,
+                isCollection = isCollection,
                 distributor = distributor,
                 releaseDate = releaseDate,
                 blurayComUrl = blurayUrl,

@@ -291,6 +291,12 @@ class MovieMetadataModal(
                                                         +mediaLabel
                                                     }
                                                 }
+                                                if (media.isCollection) {
+                                                    span {
+                                                        style = "padding: 4px 10px; background-color: #ede7f6; color: #4527a0; border-radius: 12px; font-size: 12px; font-weight: 500;"
+                                                        +"Collection"
+                                                    }
+                                                }
                                             }
 
                                             // Media details
