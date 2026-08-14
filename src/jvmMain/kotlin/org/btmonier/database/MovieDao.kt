@@ -51,7 +51,7 @@ class MovieDao(gcsService: GcsService? = null) {
         // Start with all movie IDs
         var candidateMovieIds: Set<Int>? = null
 
-        // Filter by search query (title or alternate titles)
+        // Filter by search query (title, alternate titles, or per-release alternate titles)
         if (!search.isNullOrBlank()) {
             val lowerQuery = search.lowercase()
             
@@ -65,7 +65,12 @@ class MovieDao(gcsService: GcsService? = null) {
                 .map { it[MovieAlternateTitles.movieId].value }
                 .toSet()
 
-            candidateMovieIds = mainTitleMatches + alternateTitleMatches
+            val releaseAlternateTitleMatches = PhysicalMedia.selectAll()
+                .where { PhysicalMedia.alternateTitle.lowerCase() like "%$lowerQuery%" }
+                .map { it[PhysicalMedia.movieId].value }
+                .toSet()
+
+            candidateMovieIds = mainTitleMatches + alternateTitleMatches + releaseAlternateTitleMatches
         }
 
         // Filter by genre
@@ -225,7 +230,8 @@ class MovieDao(gcsService: GcsService? = null) {
 
     /**
      * Search movies by title (case-insensitive partial match).
-     * Searches both the main title and alternate titles.
+     * Searches the main title, alternate titles, and the alternate titles a film
+     * carries on individual physical media releases.
      */
     suspend fun searchMoviesByTitle(query: String): List<MovieMetadata> = DatabaseFactory.dbQuery {
         val lowerQuery = query.lowercase()
@@ -240,8 +246,13 @@ class MovieDao(gcsService: GcsService? = null) {
             .where { MovieAlternateTitles.alternateTitle.lowerCase() like "%$lowerQuery%" }
             .map { it[MovieAlternateTitles.movieId].value }
 
-        // Combine both sets of movie IDs (distinct to avoid duplicates)
-        val allMatchingIds = (mainTitleMatches + alternateTitleMatches).distinct()
+        // Find movie IDs whose physical media lists this title on the release itself
+        val releaseAlternateTitleMatches = PhysicalMedia.selectAll()
+            .where { PhysicalMedia.alternateTitle.lowerCase() like "%$lowerQuery%" }
+            .map { it[PhysicalMedia.movieId].value }
+
+        // Combine all sets of movie IDs (distinct to avoid duplicates)
+        val allMatchingIds = (mainTitleMatches + alternateTitleMatches + releaseAlternateTitleMatches).distinct()
 
         // Fetch and return the movies
         Movies.selectAll()

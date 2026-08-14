@@ -99,6 +99,9 @@ object DatabaseFactory {
             )
         }
 
+        // Add columns introduced after their table already existed
+        SchemaMigration.addMissingColumns(database)
+
         // Convert any remaining inline category strings into lookup table references
         CategoryMigration.migrateCategoriesToLookupTables(database)
     }

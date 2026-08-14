@@ -139,6 +139,7 @@ object PhysicalMedia : IntIdTable("physical_media") {
     val movieId = reference("movie_id", Movies)
     val entryLetter = varchar("entry_letter", 1).nullable() // A-Z identifier
     val title = varchar("title", 500).nullable() // Optional title (useful for box sets)
+    val alternateTitle = varchar("alternate_title", 500).nullable() // Title this film carries on this release
     val distributorId = optReference("distributor_id", Distributors)
     val releaseDate = date("release_date").nullable()
     val blurayComUrl = varchar("bluray_com_url", 500).nullable()

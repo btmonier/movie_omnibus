@@ -183,6 +183,15 @@ class PhysicalMediaForm(
         // Title
         inputField("Title", "physical-media-form-title", media?.title ?: "", "e.g., Lord of the Rings Trilogy Box Set", required = false)
 
+        // Alternate title, for releases that list this film under a different name
+        inputField(
+            "Alternate Title on This Release",
+            "physical-media-form-alternate-title",
+            media?.alternateTitle ?: "",
+            "e.g., Spirits of Bruce Lee",
+            required = false
+        )
+
         // Media Types (checkboxes)
         div {
             style = "margin-bottom: 16px;"
@@ -733,6 +742,9 @@ class PhysicalMediaForm(
             val title = (document.getElementById("physical-media-form-title") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
 
+            val alternateTitle = (document.getElementById("physical-media-form-alternate-title") as HTMLInputElement).value.trim()
+                .takeIf { it.isNotBlank() }
+
             val distributor = selectedDistributor?.trim()?.takeIf { it.isNotBlank() }
             val releaseDate = (document.getElementById("physical-media-form-release-date") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
@@ -759,6 +771,7 @@ class PhysicalMediaForm(
                 mediaTypes = selectedMediaTypes,
                 entryLetter = entryLetter,
                 title = title,
+                alternateTitle = alternateTitle,
                 distributor = distributor,
                 releaseDate = releaseDate,
                 blurayComUrl = blurayUrl,

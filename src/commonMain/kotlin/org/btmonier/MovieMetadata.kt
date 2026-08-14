@@ -32,6 +32,7 @@ data class PhysicalMedia(
     val mediaTypes: List<MediaType>,  // Can contain multiple types (e.g., Blu-ray + DVD combo)
     val entryLetter: String? = null,  // A-Z letter identifier for the entry
     val title: String? = null,  // Optional title (useful for box sets)
+    val alternateTitle: String? = null,  // Title this film carries on this specific release
     val distributor: String? = null,
     val releaseDate: String? = null,  // ISO date string (YYYY-MM-DD)
     val blurayComUrl: String? = null,

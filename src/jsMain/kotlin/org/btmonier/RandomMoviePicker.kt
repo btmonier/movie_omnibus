@@ -792,6 +792,14 @@ class RandomMoviePicker(
                                             +title
                                         }
                                     }
+
+                                    // The name this film carries on the release itself
+                                    media.alternateTitle?.takeIf { it.isNotBlank() }?.let { alternateTitle ->
+                                        span {
+                                            style = "color: #5f6368; font-size: 14px; font-style: italic;"
+                                            +"Listed as: $alternateTitle"
+                                        }
+                                    }
                                 }
 
                                 // Media type badges

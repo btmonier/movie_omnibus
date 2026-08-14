@@ -296,6 +296,13 @@ class MovieMetadataModal(
                                             // Media details
                                             div {
                                                 style = "font-size: 13px; color: #5f6368;"
+                                                if (!media.alternateTitle.isNullOrBlank()) {
+                                                    div {
+                                                        style = "margin-bottom: 4px;"
+                                                        strong { +"Listed as: " }
+                                                        +media.alternateTitle
+                                                    }
+                                                }
                                                 if (!media.distributor.isNullOrBlank()) {
                                                     div {
                                                         style = "margin-bottom: 4px;"

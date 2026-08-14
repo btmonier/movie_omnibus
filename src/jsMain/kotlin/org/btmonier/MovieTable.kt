@@ -1309,7 +1309,8 @@ class MovieTable(private val container: Element) {
             val lowerSearch = searchText.lowercase()
             filtered = filtered.filter { movie ->
                 movie.title.lowercase().contains(lowerSearch) ||
-                movie.alternateTitles.any { it.lowercase().contains(lowerSearch) }
+                movie.alternateTitles.any { it.lowercase().contains(lowerSearch) } ||
+                movie.physicalMedia.any { it.alternateTitle?.lowercase()?.contains(lowerSearch) == true }
             }
         }
 
