@@ -25,22 +25,27 @@ class PhysicalMediaForm(
     private val alertDialog = AlertDialog(container)
     private var distributorSelector: DistributorSelector? = null
     private var selectedDistributor: String? = null
+    private var suggestedEntryLetter: String? = null
 
     /**
-     * Show the form for creating a new physical media entry.
+     * Show the form for creating a new physical media entry. [existingEntries] are
+     * the movie's current entries, used to pre-fill the next free entry letter.
      */
-    fun showCreate() {
+    fun showCreate(existingEntries: List<PhysicalMedia> = emptyList()) {
         editingMedia = null
         imageUrls.clear()
         imageUrls.add("" to null) // Start with one empty image field
         selectedDistributor = null
+        suggestedEntryLetter = nextEntryLetter(existingEntries)
         render()
     }
 
     /**
-     * Show the form for editing an existing physical media entry.
+     * Show the form for editing an existing physical media entry. [existingEntries]
+     * are the movie's current entries, used to pre-fill the next free entry letter
+     * when this entry has none yet.
      */
-    fun showEdit(media: PhysicalMedia) {
+    fun showEdit(media: PhysicalMedia, existingEntries: List<PhysicalMedia> = emptyList()) {
         editingMedia = media
         imageUrls.clear()
         imageUrls.addAll(media.displayImages().map { it.imageUrl to it.description })
@@ -48,6 +53,7 @@ class PhysicalMediaForm(
             imageUrls.add("" to null) // Ensure at least one image field
         }
         selectedDistributor = media.distributor
+        suggestedEntryLetter = nextEntryLetter(existingEntries, excludingId = media.id)
         render()
     }
 
@@ -161,8 +167,8 @@ class PhysicalMediaForm(
             }
             input(type = InputType.text) {
                 id = "form-entry-letter"
-                value = media?.entryLetter ?: ""
-                placeholder = "A-Z (optional)"
+                value = media?.entryLetter?.takeIf { it.isNotBlank() } ?: suggestedEntryLetter ?: ""
+                placeholder = "A-Z"
                 maxLength = "1"
                 style = """
                     width: 100%;
@@ -177,137 +183,6 @@ class PhysicalMediaForm(
                 attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
                 attributes["onblur"] = "this.style.borderColor='#dadce0'"
                 attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
-            }
-        }
-
-        // Title
-        inputField("Title", "physical-media-form-title", media?.title ?: "", "e.g., Lord of the Rings Trilogy Box Set", required = false)
-
-        // Alternate title, for releases that list this film under a different name
-        inputField(
-            "Alternate Title on This Release",
-            "physical-media-form-alternate-title",
-            media?.alternateTitle ?: "",
-            "e.g., Spirits of Bruce Lee",
-            required = false
-        )
-
-        // Media Types (checkboxes)
-        div {
-            style = "margin-bottom: 16px;"
-            label {
-                style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                +"Media Types"
-                span {
-                    style = "color: #d93025;"
-                    +" *"
-                }
-            }
-            div {
-                id = "media-types-container"
-                style = "display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px; border: 1px solid #dadce0; border-radius: 4px; background-color: #f8f9fa;"
-
-                val selectedTypes = media?.mediaTypes ?: emptyList()
-                MediaType.values().forEach { type ->
-                    val typeLabel = when (type) {
-                        MediaType.VHS -> "VHS"
-                        MediaType.DVD -> "DVD"
-                        MediaType.BLURAY -> "Blu-ray"
-                        MediaType.FOURK -> "4K"
-                        MediaType.DIGITAL -> "Digital"
-                    }
-
-                    label {
-                        style = """
-                            display: flex;
-                            align-items: center;
-                            padding: 8px;
-                            cursor: pointer;
-                            border-radius: 4px;
-                            transition: background-color 0.2s;
-                            font-size: 14px;
-                            color: #202124;
-                        """.trimIndent()
-                        attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
-                        attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
-
-                        input(type = InputType.checkBox) {
-                            name = "media-type"
-                            value = type.name
-                            checked = (type in selectedTypes)
-                            style = "margin-right: 8px; cursor: pointer;"
-                        }
-                        +typeLabel
-                    }
-                }
-            }
-        }
-
-        // Collection flag
-        div {
-            style = "margin-bottom: 16px;"
-            label {
-                style = """
-                    display: flex;
-                    align-items: center;
-                    cursor: pointer;
-                    font-size: 14px;
-                    color: #202124;
-                """.trimIndent()
-
-                input(type = InputType.checkBox) {
-                    id = "physical-media-form-is-collection"
-                    checked = media?.isCollection == true
-                    style = "margin-right: 8px; cursor: pointer;"
-                }
-                +"Collection"
-            }
-            div {
-                style = "margin-top: 4px; margin-left: 24px; font-size: 12px; color: #5f6368;"
-                +"This unit contains 2 or more films (e.g., a box set)"
-            }
-        }
-
-        // Distributor Selector Container
-        div {
-            id = "distributor-selector-container"
-            style = "position: relative;"
-        }
-
-        // Initialize the distributor selector after rendering
-        mainScope.launch {
-            distributorSelector = DistributorSelector(
-                containerId = "distributor-selector-container",
-                selectedDistributor = selectedDistributor,
-                onDistributorChanged = { newDistributor ->
-                    selectedDistributor = newDistributor
-                }
-            )
-            distributorSelector?.render()
-        }
-
-        // Release Date
-        div {
-            style = "margin-bottom: 16px;"
-            label {
-                htmlFor = "physical-media-form-release-date"
-                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                +"Release Date"
-            }
-            input(type = InputType.date) {
-                id = "physical-media-form-release-date"
-                value = media?.releaseDate ?: ""
-                style = """
-                    width: 100%;
-                    padding: 10px 12px;
-                    font-size: 14px;
-                    border: 1px solid #dadce0;
-                    border-radius: 4px;
-                    box-sizing: border-box;
-                    font-family: 'Roboto', arial, sans-serif;
-                """.trimIndent()
-                attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
-                attributes["onblur"] = "this.style.borderColor='#dadce0'"
             }
         }
 
@@ -408,6 +283,137 @@ class PhysicalMediaForm(
                     selected = (media?.location == "Shelf")
                     +"Shelf"
                 }
+            }
+        }
+
+        // Collection flag
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                style = """
+                    display: flex;
+                    align-items: center;
+                    cursor: pointer;
+                    font-size: 14px;
+                    color: #202124;
+                """.trimIndent()
+
+                input(type = InputType.checkBox) {
+                    id = "physical-media-form-is-collection"
+                    checked = media?.isCollection == true
+                    style = "margin-right: 8px; cursor: pointer;"
+                }
+                +"Collection"
+            }
+            div {
+                style = "margin-top: 4px; margin-left: 24px; font-size: 12px; color: #5f6368;"
+                +"This unit contains 2 or more films (e.g., a box set)"
+            }
+        }
+
+        // Alternate title, for releases that list this film under a different name
+        inputField(
+            "Alternate Title on This Release",
+            "physical-media-form-alternate-title",
+            media?.alternateTitle ?: "",
+            "e.g., Spirits of Bruce Lee",
+            required = false
+        )
+
+        // Title
+        inputField("Title", "physical-media-form-title", media?.title ?: "", "e.g., Lord of the Rings Trilogy Box Set", required = false)
+
+        // Media Types (checkboxes)
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                style = "display: block; margin-bottom: 8px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                +"Media Types"
+                span {
+                    style = "color: #d93025;"
+                    +" *"
+                }
+            }
+            div {
+                id = "media-types-container"
+                style = "display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 12px; border: 1px solid #dadce0; border-radius: 4px; background-color: #f8f9fa;"
+
+                val selectedTypes = media?.mediaTypes ?: emptyList()
+                MediaType.values().forEach { type ->
+                    val typeLabel = when (type) {
+                        MediaType.VHS -> "VHS"
+                        MediaType.DVD -> "DVD"
+                        MediaType.BLURAY -> "Blu-ray"
+                        MediaType.FOURK -> "4K"
+                        MediaType.DIGITAL -> "Digital"
+                    }
+
+                    label {
+                        style = """
+                            display: flex;
+                            align-items: center;
+                            padding: 8px;
+                            cursor: pointer;
+                            border-radius: 4px;
+                            transition: background-color 0.2s;
+                            font-size: 14px;
+                            color: #202124;
+                        """.trimIndent()
+                        attributes["onmouseover"] = "this.style.backgroundColor='#e8eaed'"
+                        attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+
+                        input(type = InputType.checkBox) {
+                            name = "media-type"
+                            value = type.name
+                            checked = (type in selectedTypes)
+                            style = "margin-right: 8px; cursor: pointer;"
+                        }
+                        +typeLabel
+                    }
+                }
+            }
+        }
+
+        // Distributor Selector Container
+        div {
+            id = "distributor-selector-container"
+            style = "position: relative;"
+        }
+
+        // Initialize the distributor selector after rendering
+        mainScope.launch {
+            distributorSelector = DistributorSelector(
+                containerId = "distributor-selector-container",
+                selectedDistributor = selectedDistributor,
+                onDistributorChanged = { newDistributor ->
+                    selectedDistributor = newDistributor
+                }
+            )
+            distributorSelector?.render()
+        }
+
+        // Release Date
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                htmlFor = "physical-media-form-release-date"
+                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                +"Release Date"
+            }
+            input(type = InputType.date) {
+                id = "physical-media-form-release-date"
+                value = media?.releaseDate ?: ""
+                style = """
+                    width: 100%;
+                    padding: 10px 12px;
+                    font-size: 14px;
+                    border: 1px solid #dadce0;
+                    border-radius: 4px;
+                    box-sizing: border-box;
+                    font-family: 'Roboto', arial, sans-serif;
+                """.trimIndent()
+                attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
+                attributes["onblur"] = "this.style.borderColor='#dadce0'"
             }
         }
 

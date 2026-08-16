@@ -19,6 +19,11 @@ object BluRayComUtils {
         "sep" to "09", "oct" to "10", "nov" to "11", "dec" to "12"
     )
 
+    private val FORMAT_KEYWORD = Regex(
+        """\b(?:4K|Ultra\s*HD|Blu-?ray|DVD|VHS)\b""",
+        RegexOption.IGNORE_CASE
+    )
+
     /**
      * Returns true if the URL points to a blu-ray.com release page. This covers
      * both Blu-ray/4K releases under `/movies/`, e.g.
@@ -36,6 +41,9 @@ object BluRayComUtils {
     /**
      * Extracts the release title (including edition) from the og:title meta tag,
      * e.g. "Invaders from Mars 4K Blu-ray (Standard Edition)".
+     *
+     * The format and edition text is kept here because [extractMediaTypes] scans
+     * this string as a fallback signal; use [cleanReleaseTitle] for the film name.
      */
     fun extractTitle(doc: Document): String? {
         doc.select("meta[property=og:title]").attr("content").trim().takeIf { it.isNotBlank() }
@@ -47,6 +55,26 @@ object BluRayComUtils {
             .substringBefore(" - Blu-ray.com")
             .trim()
         return titleText.takeIf { it.isNotBlank() }
+    }
+
+    /**
+     * Trims a release title down to the film name by cutting it at the first
+     * physical format keyword, so "Bad Ronald Blu-ray (Warner Archive)" becomes
+     * "Bad Ronald" and "1-Ichi DVD (Special Edition)" becomes "1-Ichi".
+     *
+     * "Digital" is not a cut keyword: it only ever shows up as a secondary combo
+     * token (e.g. "... Blu-ray + Digital"), which the earlier "Blu-ray" match
+     * already covers, and cutting on it would mangle films whose name starts with
+     * the word. Titles with no format keyword, or where the keyword is the very
+     * first word, are returned unchanged.
+     */
+    fun cleanReleaseTitle(raw: String?): String? {
+        val title = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        val match = FORMAT_KEYWORD.find(title) ?: return title
+        if (match.range.first == 0) return title
+        return title.substring(0, match.range.first)
+            .trimEnd(' ', '\t', '-', '–', '—', ':', ',')
+            .takeIf { it.isNotBlank() } ?: title
     }
 
     /**
@@ -203,7 +231,7 @@ object BluRayComUtils {
     fun extractPhysicalMedia(doc: Document, url: String): PhysicalMedia {
         return PhysicalMedia(
             mediaTypes = extractMediaTypes(doc),
-            title = extractTitle(doc),
+            title = cleanReleaseTitle(extractTitle(doc)),
             distributor = extractDistributor(doc),
             releaseDate = extractReleaseDate(doc),
             blurayComUrl = url,

@@ -725,14 +725,14 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         val physicalMediaForm = PhysicalMediaForm(container, onSave = { physicalMedia ->
             createPhysicalMediaEntry(movieId, physicalMedia)
         }, onCancel = {})
-        physicalMediaForm.showCreate()
+        physicalMediaForm.showCreate(editingMovie?.physicalMedia ?: emptyList())
     }
 
     private fun showEditPhysicalMediaForm(movieId: Int, media: PhysicalMedia) {
         val physicalMediaForm = PhysicalMediaForm(container, onSave = { updatedMedia ->
             updatePhysicalMediaEntry(media.id!!, updatedMedia)
         }, onCancel = {})
-        physicalMediaForm.showEdit(media)
+        physicalMediaForm.showEdit(media, editingMovie?.physicalMedia ?: emptyList())
     }
 
     private fun handleDeletePhysicalMedia(media: PhysicalMedia) {

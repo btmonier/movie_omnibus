@@ -78,6 +78,24 @@ fun PhysicalMedia.displayImages(): List<PhysicalMediaImage> {
 }
 
 /**
+ * Picks the entry letter to assign to a physical media entry, given the entries a
+ * movie already has: the first letter of the alphabet not already in use, so a
+ * movie with entries A and C gets B rather than D.
+ *
+ * Pass [excludingId] when re-assigning a letter for an existing entry so its own
+ * letter does not count as taken. Returns null once all 26 letters are used.
+ */
+fun nextEntryLetter(existing: List<PhysicalMedia>, excludingId: Int? = null): String? {
+    val used = existing
+        .filter { excludingId == null || it.id != excludingId }
+        .mapNotNull { entry ->
+            entry.entryLetter?.trim()?.uppercase()?.takeIf { it.length == 1 && it[0] in 'A'..'Z' }
+        }
+        .toSet()
+    return ('A'..'Z').firstOrNull { it.toString() !in used }?.toString()
+}
+
+/**
  * Data class for watched entries
  * A movie can be watched multiple times with different ratings
  */

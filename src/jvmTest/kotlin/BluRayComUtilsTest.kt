@@ -43,6 +43,58 @@ class BluRayComUtilsTest {
     }
 
     @Test
+    fun `cleanReleaseTitle cuts the title at the first format keyword`() {
+        assertEquals("Bad Ronald", BluRayComUtils.cleanReleaseTitle("Bad Ronald Blu-ray (Warner Archive)"))
+        assertEquals("Invaders from Mars", BluRayComUtils.cleanReleaseTitle("Invaders from Mars 4K Blu-ray (Standard Edition)"))
+        assertEquals("1-Ichi", BluRayComUtils.cleanReleaseTitle("1-Ichi DVD (Special Edition)"))
+        assertEquals("The 'Burbs", BluRayComUtils.cleanReleaseTitle("The 'Burbs 4K Ultra HD"))
+        assertEquals("Halloween", BluRayComUtils.cleanReleaseTitle("Halloween - VHS"))
+    }
+
+    @Test
+    fun `cleanReleaseTitle leaves titles without a format keyword untouched`() {
+        assertEquals("Bad Ronald", BluRayComUtils.cleanReleaseTitle("Bad Ronald"))
+        assertEquals("Digital Man", BluRayComUtils.cleanReleaseTitle("Digital Man"))
+        assertEquals(null, BluRayComUtils.cleanReleaseTitle(null))
+        assertEquals(null, BluRayComUtils.cleanReleaseTitle("   "))
+    }
+
+    @Test
+    fun `cleanReleaseTitle keeps titles that start with a format keyword`() {
+        // Nothing precedes the keyword, so there is no film name to keep.
+        assertEquals("DVD Hell", BluRayComUtils.cleanReleaseTitle("DVD Hell"))
+        assertEquals("4K Blu-ray", BluRayComUtils.cleanReleaseTitle("4K Blu-ray"))
+    }
+
+    @Test
+    fun `nextEntryLetter picks the first unused letter`() {
+        fun entry(letter: String?, id: Int? = null) =
+            PhysicalMedia(mediaTypes = listOf(MediaType.BLURAY), entryLetter = letter, id = id)
+
+        assertEquals("A", nextEntryLetter(emptyList()))
+        assertEquals("B", nextEntryLetter(listOf(entry("A"))))
+        assertEquals("C", nextEntryLetter(listOf(entry("A"), entry("B"))))
+        // Gaps are filled rather than skipped.
+        assertEquals("B", nextEntryLetter(listOf(entry("A"), entry("C"))))
+        // Entries with no letter yet do not consume one.
+        assertEquals("A", nextEntryLetter(listOf(entry(null), entry("   "))))
+        // Letters are compared case-insensitively.
+        assertEquals("B", nextEntryLetter(listOf(entry("a"))))
+        assertEquals(null, nextEntryLetter(('A'..'Z').map { entry(it.toString()) }))
+    }
+
+    @Test
+    fun `nextEntryLetter ignores the entry being edited`() {
+        fun entry(letter: String?, id: Int?) =
+            PhysicalMedia(mediaTypes = listOf(MediaType.BLURAY), entryLetter = letter, id = id)
+
+        val entries = listOf(entry("A", 1), entry("B", 2))
+        assertEquals("A", nextEntryLetter(entries, excludingId = 1))
+        assertEquals("B", nextEntryLetter(entries, excludingId = 2))
+        assertEquals("C", nextEntryLetter(entries, excludingId = 99))
+    }
+
+    @Test
     fun `extractDistributor reads studio link`() {
         val html = """
             <html><body>
@@ -146,7 +198,7 @@ class BluRayComUtilsTest {
         val media = BluRayComUtils.extractPhysicalMedia(doc, url)
 
         assertEquals(url, media.blurayComUrl)
-        assertEquals("Invaders from Mars 4K Blu-ray (Standard Edition)", media.title)
+        assertEquals("Invaders from Mars", media.title)
         assertEquals("Ignite Films", media.distributor)
         assertEquals("2023-07-11", media.releaseDate)
         assertTrue(media.mediaTypes.contains(MediaType.FOURK), "Should detect 4K")
@@ -214,7 +266,7 @@ class BluRayComUtilsTest {
         val media = BluRayComUtils.extractPhysicalMedia(doc, url)
 
         assertEquals(url, media.blurayComUrl)
-        assertEquals("1-Ichi DVD (Special Edition)", media.title)
+        assertEquals("1-Ichi", media.title)
         assertEquals("Unearthed Films", media.distributor)
         assertEquals("2007-10-30", media.releaseDate)
         assertTrue(media.mediaTypes.contains(MediaType.DVD), "Should detect DVD")
