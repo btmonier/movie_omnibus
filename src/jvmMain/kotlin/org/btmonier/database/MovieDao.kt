@@ -65,9 +65,9 @@ class MovieDao(gcsService: GcsService? = null) {
                 .map { it[MovieAlternateTitles.movieId].value }
                 .toSet()
 
-            val releaseAlternateTitleMatches = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.alternateTitle.lowerCase() like "%$lowerQuery%" }
-                .map { it[PhysicalMedia.movieId].value }
+            val releaseAlternateTitleMatches = ReleaseMovies.selectAll()
+                .where { ReleaseMovies.alternateTitle.lowerCase() like "%$lowerQuery%" }
+                .map { it[ReleaseMovies.movieId].value }
                 .toSet()
 
             candidateMovieIds = mainTitleMatches + alternateTitleMatches + releaseAlternateTitleMatches
@@ -143,14 +143,14 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by media type
         if (!mediaType.isNullOrBlank()) {
-            val physicalMediaIdsWithType = PhysicalMediaTypes.selectAll()
-                .where { PhysicalMediaTypes.mediaType eq mediaType }
-                .map { it[PhysicalMediaTypes.physicalMediaId].value }
+            val releaseIdsWithType = ReleaseMediaTypes.selectAll()
+                .where { ReleaseMediaTypes.mediaType eq mediaType }
+                .map { it[ReleaseMediaTypes.releaseId].value }
                 .toSet()
 
-            val movieIdsWithMediaType = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.id inList physicalMediaIdsWithType }
-                .map { it[PhysicalMedia.movieId].value }
+            val movieIdsWithMediaType = ReleaseMovies.selectAll()
+                .where { ReleaseMovies.releaseId inList releaseIdsWithType }
+                .map { it[ReleaseMovies.movieId].value }
                 .toSet()
 
             candidateMovieIds = candidateMovieIds?.intersect(movieIdsWithMediaType) ?: movieIdsWithMediaType
@@ -247,9 +247,9 @@ class MovieDao(gcsService: GcsService? = null) {
             .map { it[MovieAlternateTitles.movieId].value }
 
         // Find movie IDs whose physical media lists this title on the release itself
-        val releaseAlternateTitleMatches = PhysicalMedia.selectAll()
-            .where { PhysicalMedia.alternateTitle.lowerCase() like "%$lowerQuery%" }
-            .map { it[PhysicalMedia.movieId].value }
+        val releaseAlternateTitleMatches = ReleaseMovies.selectAll()
+            .where { ReleaseMovies.alternateTitle.lowerCase() like "%$lowerQuery%" }
+            .map { it[ReleaseMovies.movieId].value }
 
         // Combine all sets of movie IDs (distinct to avoid duplicates)
         val allMatchingIds = (mainTitleMatches + alternateTitleMatches + releaseAlternateTitleMatches).distinct()
@@ -442,8 +442,8 @@ class MovieDao(gcsService: GcsService? = null) {
      * Get all unique media types from the database (for filtering).
      */
     suspend fun getAllMediaTypes(): List<String> = DatabaseFactory.dbQuery {
-        PhysicalMediaTypes.selectAll()
-            .map { it[PhysicalMediaTypes.mediaType] }
+        ReleaseMediaTypes.selectAll()
+            .map { it[ReleaseMediaTypes.mediaType] }
             .distinct()
             .sorted()
     }
@@ -546,14 +546,14 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by media types if specified (OR logic)
         if (mediaTypes.isNotEmpty()) {
-            val physicalMediaIdsWithTypes = PhysicalMediaTypes.selectAll()
-                .where { PhysicalMediaTypes.mediaType inList mediaTypes }
-                .map { it[PhysicalMediaTypes.physicalMediaId].value }
+            val releaseIdsWithTypes = ReleaseMediaTypes.selectAll()
+                .where { ReleaseMediaTypes.mediaType inList mediaTypes }
+                .map { it[ReleaseMediaTypes.releaseId].value }
                 .toSet()
 
-            val movieIdsWithMediaTypes = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.id inList physicalMediaIdsWithTypes }
-                .map { it[PhysicalMedia.movieId].value }
+            val movieIdsWithMediaTypes = ReleaseMovies.selectAll()
+                .where { ReleaseMovies.releaseId inList releaseIdsWithTypes }
+                .map { it[ReleaseMovies.movieId].value }
                 .toSet()
 
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaTypes)
@@ -659,14 +659,14 @@ class MovieDao(gcsService: GcsService? = null) {
 
         // Filter by media types if specified (OR logic)
         if (mediaTypes.isNotEmpty()) {
-            val physicalMediaIdsWithTypes = PhysicalMediaTypes.selectAll()
-                .where { PhysicalMediaTypes.mediaType inList mediaTypes }
-                .map { it[PhysicalMediaTypes.physicalMediaId].value }
+            val releaseIdsWithTypes = ReleaseMediaTypes.selectAll()
+                .where { ReleaseMediaTypes.mediaType inList mediaTypes }
+                .map { it[ReleaseMediaTypes.releaseId].value }
                 .toSet()
 
-            val movieIdsWithMediaTypes = PhysicalMedia.selectAll()
-                .where { PhysicalMedia.id inList physicalMediaIdsWithTypes }
-                .map { it[PhysicalMedia.movieId].value }
+            val movieIdsWithMediaTypes = ReleaseMovies.selectAll()
+                .where { ReleaseMovies.releaseId inList releaseIdsWithTypes }
+                .map { it[ReleaseMovies.movieId].value }
                 .toSet()
 
             candidateMovieIds = candidateMovieIds.intersect(movieIdsWithMediaTypes)

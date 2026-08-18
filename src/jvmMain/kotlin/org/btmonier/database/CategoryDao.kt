@@ -90,9 +90,12 @@ class CategoryDao {
             Collections, Collections.name, Collections.description,
             "movie_collections", "collection_id", "movie_id", usageIsOptional = false, usageIsUnique = true
         ),
+        // Counted per release rather than per movie: a distributor's reach is the
+        // number of physical units it published, and a box set is one of those no
+        // matter how many films it holds.
         CategoryType.DISTRIBUTOR to Spec(
             Distributors, Distributors.name, null,
-            "physical_media", "distributor_id", "movie_id", usageIsOptional = true, usageIsUnique = false
+            "releases", "distributor_id", "id", usageIsOptional = true, usageIsUnique = false
         ),
         CategoryType.THEME to Spec(
             Themes, Themes.name, null,

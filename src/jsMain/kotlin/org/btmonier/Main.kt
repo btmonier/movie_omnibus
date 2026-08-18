@@ -277,6 +277,172 @@ suspend fun deletePhysicalMedia(id: Int): Boolean {
     return response.ok
 }
 
+// ==================== Releases API ====================
+
+/**
+ * Paginated response for the release browser.
+ */
+@kotlinx.serialization.Serializable
+data class PaginatedReleasesResponse(
+    val releases: List<ReleaseSummary>,
+    val totalCount: Int,
+    val page: Int,
+    val pageSize: Int,
+    val totalPages: Int
+)
+
+/**
+ * Paginated response for the films on one release.
+ */
+@kotlinx.serialization.Serializable
+data class PaginatedReleaseFilmsResponse(
+    val films: List<ReleaseFilm>,
+    val totalCount: Int,
+    val page: Int,
+    val pageSize: Int,
+    val totalPages: Int
+)
+
+@kotlinx.serialization.Serializable
+data class LinkMovieRequest(
+    val movieId: Int,
+    val entryLetter: String? = null,
+    val alternateTitle: String? = null
+)
+
+/**
+ * Browse releases with optional filters.
+ */
+suspend fun fetchReleasesPaginated(
+    page: Int = 1,
+    pageSize: Int = 24,
+    search: String? = null,
+    mediaType: String? = null,
+    distributor: String? = null,
+    location: String? = null,
+    collectionsOnly: Boolean = false,
+    sortField: String? = null,
+    sortDirection: String? = null
+): PaginatedReleasesResponse {
+    val params = mutableListOf("page=$page", "pageSize=$pageSize")
+    search?.let { if (it.isNotBlank()) params.add("search=${encodeURIComponent(it)}") }
+    mediaType?.let { if (it.isNotBlank()) params.add("mediaType=${encodeURIComponent(it)}") }
+    distributor?.let { if (it.isNotBlank()) params.add("distributor=${encodeURIComponent(it)}") }
+    location?.let { if (it.isNotBlank()) params.add("location=${encodeURIComponent(it)}") }
+    if (collectionsOnly) params.add("collectionsOnly=true")
+    sortField?.let { if (it.isNotBlank()) params.add("sortField=$it") }
+    sortDirection?.let { if (it.isNotBlank()) params.add("sortDirection=$it") }
+
+    val response = window.fetch("$API_BASE_URL/releases?" + params.joinToString("&")).await()
+    if (!response.ok) {
+        throw Exception("Failed to fetch releases: ${response.status} ${response.statusText}")
+    }
+    return Json.decodeFromString(response.text().await())
+}
+
+/**
+ * Get a single release with its films.
+ */
+suspend fun fetchRelease(id: Int): Release {
+    val response = window.fetch("$API_BASE_URL/releases/$id").await()
+    if (!response.ok) {
+        throw Exception("Failed to fetch release: ${response.status} ${response.statusText}")
+    }
+    return Json.decodeFromString(Release.serializer(), response.text().await())
+}
+
+/**
+ * Get a page of the films on a release. Large box sets are read a page at a time.
+ */
+suspend fun fetchReleaseFilms(
+    releaseId: Int,
+    page: Int = 1,
+    pageSize: Int = 24,
+    search: String? = null
+): PaginatedReleaseFilmsResponse {
+    val params = mutableListOf("page=$page", "pageSize=$pageSize")
+    search?.let { if (it.isNotBlank()) params.add("search=${encodeURIComponent(it)}") }
+
+    val response = window.fetch("$API_BASE_URL/releases/$releaseId/movies?" + params.joinToString("&")).await()
+    if (!response.ok) {
+        throw Exception("Failed to fetch films: ${response.status} ${response.statusText}")
+    }
+    return Json.decodeFromString(response.text().await())
+}
+
+/**
+ * Find releases to link a movie to.
+ */
+suspend fun searchReleases(query: String, limit: Int = 20): List<ReleaseSummary> {
+    if (query.isBlank()) return emptyList()
+    val response = window.fetch("$API_BASE_URL/releases/search?q=${encodeURIComponent(query)}&limit=$limit").await()
+    if (!response.ok) return emptyList()
+    return Json.decodeFromString(ListSerializer(ReleaseSummary.serializer()), response.text().await())
+}
+
+/**
+ * The release already recorded under a blu-ray.com URL, or null when it is new.
+ */
+suspend fun findReleaseByBluRayUrl(url: String): ReleaseSummary? {
+    if (url.isBlank()) return null
+    val response = window.fetch("$API_BASE_URL/releases/by-bluray-url?url=${encodeURIComponent(url)}").await()
+    if (!response.ok) return null
+    return Json.decodeFromString(ReleaseSummary.serializer(), response.text().await())
+}
+
+suspend fun updateRelease(id: Int, release: Release): Release {
+    val response = window.fetch("$API_BASE_URL/releases/$id", RequestInit(
+        method = "PUT",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(Release.serializer(), release)
+    )).await()
+
+    if (!response.ok) {
+        throw Exception("Failed to update release: ${response.text().await()}")
+    }
+    return Json.decodeFromString(Release.serializer(), response.text().await())
+}
+
+suspend fun deleteRelease(id: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/releases/$id", RequestInit(method = "DELETE")).await()
+    return response.ok
+}
+
+/**
+ * Put a film on a release.
+ */
+suspend fun linkMovieToRelease(
+    releaseId: Int,
+    movieId: Int,
+    entryLetter: String? = null,
+    alternateTitle: String? = null
+): Boolean {
+    val response = window.fetch("$API_BASE_URL/releases/$releaseId/movies", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(
+            LinkMovieRequest.serializer(),
+            LinkMovieRequest(movieId, entryLetter, alternateTitle)
+        )
+    )).await()
+
+    if (!response.ok) {
+        throw Exception("Failed to add the film to this release: ${response.text().await()}")
+    }
+    return true
+}
+
+/**
+ * Take a film off a release.
+ */
+suspend fun unlinkMovieFromRelease(releaseId: Int, movieId: Int): Boolean {
+    val response = window.fetch(
+        "$API_BASE_URL/releases/$releaseId/movies/$movieId",
+        RequestInit(method = "DELETE")
+    ).await()
+    return response.ok
+}
+
 // ==================== Watched Entries API ====================
 
 suspend fun fetchWatchedEntriesForMovie(movieId: Int): List<WatchedEntry> {
@@ -604,6 +770,9 @@ data class BluRayScrapeRequest(val url: String)
 data class PhysicalMediaScrapeResponse(
     val success: Boolean,
     val physicalMedia: PhysicalMedia? = null,
+    // Set when this URL is already recorded, so the form can offer to link that
+    // release instead of entering it a second time.
+    val existingRelease: ReleaseSummary? = null,
     val error: String? = null
 )
 

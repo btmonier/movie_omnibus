@@ -133,15 +133,14 @@ object MovieCrew : IntIdTable("movie_crew") {
 }
 
 /**
- * Table for physical media entries (one-to-many relationship)
+ * Table for physical releases - one row per owned physical unit, no matter how
+ * many films it holds. A 200 film box set is a single row here, linked to each
+ * of its films through [ReleaseMovies].
  */
-object PhysicalMedia : IntIdTable("physical_media") {
-    val movieId = reference("movie_id", Movies)
-    val entryLetter = varchar("entry_letter", 1).nullable() // A-Z identifier
+object Releases : IntIdTable("releases") {
     val title = varchar("title", 500).nullable() // Optional title (useful for box sets)
-    val alternateTitle = varchar("alternate_title", 500).nullable() // Title this film carries on this release
-    // Unit holds 2+ films (box set, multi-feature disc). Nullable so it can be
-    // added to existing tables by SchemaMigration; null reads as false.
+    // Unit holds 2+ films (box set, multi-feature disc). Nullable so it reads the
+    // same as the legacy physical_media column it was migrated from; null is false.
     val isCollection = bool("is_collection").nullable()
     val distributorId = optReference("distributor_id", Distributors)
     val releaseDate = date("release_date").nullable()
@@ -151,23 +150,33 @@ object PhysicalMedia : IntIdTable("physical_media") {
 }
 
 /**
- * Table for physical media types (many-to-many relationship with physical_media)
- * A single physical media entry can have multiple types (e.g., Blu-ray + DVD combo)
+ * Table linking films to the releases they appear on (many-to-many).
+ * Carries the data that is specific to one film on one release rather than to
+ * the release as a whole.
  */
-object PhysicalMediaTypes : IntIdTable("physical_media_types") {
-    val physicalMediaId = reference("physical_media_id", PhysicalMedia)
+object ReleaseMovies : IntIdTable("release_movies") {
+    val releaseId = reference("release_id", Releases)
+    val movieId = reference("movie_id", Movies)
+    val entryLetter = varchar("entry_letter", 1).nullable() // A-Z identifier among a movie's copies
+    val alternateTitle = varchar("alternate_title", 500).nullable() // Title this film carries on this release
+}
+
+/**
+ * Table for release media types (many-to-many relationship with releases)
+ * A single release can have multiple types (e.g., Blu-ray + DVD combo)
+ */
+object ReleaseMediaTypes : IntIdTable("release_media_types") {
+    val releaseId = reference("release_id", Releases)
     val mediaType = varchar("media_type", 50) // VHS, DVD, Blu-ray, 4K
 }
 
 /**
- * Table for physical media images (one-to-many relationship with physical_media)
+ * Table for release images (one-to-many relationship with releases)
  */
-object PhysicalMediaImages : IntIdTable("physical_media_images") {
-    val physicalMediaId = reference("physical_media_id", PhysicalMedia)
+object ReleaseImages : IntIdTable("release_images") {
+    val releaseId = reference("release_id", Releases)
     // Use text (not a bounded varchar) so long values such as GCS signed URLs
-    // can never overflow the column. Existing databases need a one-off migration
-    // (SchemaUtils.create does not ALTER existing columns):
-    //   ALTER TABLE physical_media_images ALTER COLUMN image_url TYPE text;
+    // can never overflow the column.
     val imageUrl = text("image_url")
     val description = varchar("description", 200).nullable()
 }

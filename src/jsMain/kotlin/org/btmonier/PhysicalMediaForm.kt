@@ -23,9 +23,21 @@ class PhysicalMediaForm(
     private var editingMedia: PhysicalMedia? = null
     private val imageUrls = mutableListOf<Pair<String, String?>>() // url, description
     private val alertDialog = AlertDialog(container)
+    private val confirmDialog = ConfirmDialog(container)
     private var distributorSelector: DistributorSelector? = null
+    private var releaseSelector: ReleaseSelector? = null
     private var selectedDistributor: String? = null
     private var suggestedEntryLetter: String? = null
+
+    /**
+     * The release this entry points at once it is linked to a shared one. While
+     * set, every field except the entry letter and the alternate title belongs to
+     * that release and is shown read-only.
+     */
+    private var linkedRelease: ReleaseSummary? = null
+
+    /** Films already on the release being edited, other than this one. */
+    private var sharedWithCount: Int = 0
 
     /**
      * Show the form for creating a new physical media entry. [existingEntries] are
@@ -36,6 +48,8 @@ class PhysicalMediaForm(
         imageUrls.clear()
         imageUrls.add("" to null) // Start with one empty image field
         selectedDistributor = null
+        linkedRelease = null
+        sharedWithCount = 0
         suggestedEntryLetter = nextEntryLetter(existingEntries)
         render()
     }
@@ -53,9 +67,20 @@ class PhysicalMediaForm(
             imageUrls.add("" to null) // Ensure at least one image field
         }
         selectedDistributor = media.distributor
+        // An existing entry is always a view of a release, but only a release
+        // shared with other films is locked down; a release this film has to
+        // itself stays fully editable.
+        linkedRelease = null
+        sharedWithCount = media.sharedWithCount
         suggestedEntryLetter = nextEntryLetter(existingEntries, excludingId = media.id)
         render()
     }
+
+    /**
+     * True while the form is filling in a release that other films also use, so
+     * the shared fields are read-only.
+     */
+    private fun isLinked(): Boolean = linkedRelease != null
 
     /**
      * Close and hide the form.
@@ -156,6 +181,45 @@ class PhysicalMediaForm(
 
     private fun DIV.renderFormFields() {
         val media = editingMedia
+        val linked = isLinked()
+
+        // Warn up front when an edit here will land on other films too
+        if (media != null && sharedWithCount > 0) {
+            div {
+                style = """
+                    margin-bottom: 20px;
+                    padding: 12px 14px;
+                    background-color: #fef7e0;
+                    border: 1px solid #fdd663;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    color: #7c5800;
+                    line-height: 1.5;
+                """.trimIndent()
+                +("This release is shared with $sharedWithCount other " +
+                    (if (sharedWithCount == 1) "film" else "films") +
+                    ". Everything except the entry letter and the alternate title below is part of the release, " +
+                    "so changing it updates those films too.")
+            }
+        }
+
+        // Link to an existing release. Only offered when adding, since an entry
+        // that already exists is a view of a release rather than a new one.
+        if (media == null) {
+            div { id = "release-selector-container" }
+
+            mainScope.launch {
+                releaseSelector = ReleaseSelector(
+                    containerId = "release-selector-container",
+                    selected = linkedRelease,
+                    onSelectionChanged = { release ->
+                        linkedRelease = release
+                        applyLinkedRelease(release)
+                    }
+                )
+                releaseSelector?.render()
+            }
+        }
 
         // Entry Letter
         div {
@@ -184,6 +248,26 @@ class PhysicalMediaForm(
                 attributes["onblur"] = "this.style.borderColor='#dadce0'"
                 attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
             }
+        }
+
+        // Alternate title, for releases that list this film under a different name.
+        // Sits with the entry letter because both describe this film's place on the
+        // release rather than the release itself.
+        inputField(
+            "Alternate Title on This Release",
+            "physical-media-form-alternate-title",
+            media?.alternateTitle ?: "",
+            "e.g., Spirits of Bruce Lee",
+            required = false
+        )
+
+        // Everything below belongs to the release and is therefore shared with
+        // every film on it. Hidden entirely while linked to an existing release,
+        // since those values come from the release that was picked.
+        div {
+        id = "shared-release-fields"
+        if (linked) {
+            style = "display: none;"
         }
 
         // Bluray.com URL with inline "Fetch details" button
@@ -310,15 +394,6 @@ class PhysicalMediaForm(
                 +"This unit contains 2 or more films (e.g., a box set)"
             }
         }
-
-        // Alternate title, for releases that list this film under a different name
-        inputField(
-            "Alternate Title on This Release",
-            "physical-media-form-alternate-title",
-            media?.alternateTitle ?: "",
-            "e.g., Spirits of Bruce Lee",
-            required = false
-        )
 
         // Title
         inputField("Title", "physical-media-form-title", media?.title ?: "", "e.g., Lord of the Rings Trilogy Box Set", required = false)
@@ -466,8 +541,20 @@ class PhysicalMediaForm(
             }
         }
 
+        } // end shared-release-fields
+
         // Initial render of images
         renderImages()
+    }
+
+    /**
+     * Show or hide the release-level fields as the link to an existing release
+     * comes and goes. Linked entries take those values from the release, so the
+     * inputs would only invite edits that are silently ignored.
+     */
+    private fun applyLinkedRelease(release: ReleaseSummary?) {
+        val shared = document.getElementById("shared-release-fields") as? HTMLElement ?: return
+        shared.style.display = if (release == null) "block" else "none"
     }
 
     /**
@@ -664,7 +751,13 @@ class PhysicalMediaForm(
         mainScope.launch {
             try {
                 val response = scrapeBluRayUrl(url)
-                if (response.success && response.physicalMedia != null) {
+                val existing = response.existingRelease
+                if (existing != null && editingMedia == null) {
+                    // This disc is already recorded. Offer to point at it rather
+                    // than let a second hand-typed copy of it be created.
+                    setFetchStatus(null, null)
+                    offerToLink(existing, response.physicalMedia)
+                } else if (response.success && response.physicalMedia != null) {
                     applyScrapedData(response.physicalMedia)
                     setFetchStatus("Details loaded. Review and edit before saving.", "#188038")
                 } else {
@@ -684,6 +777,36 @@ class PhysicalMediaForm(
                 fetchButton?.disabled = false
             }
         }
+    }
+
+    /**
+     * Ask whether to join a release already recorded under this URL. Declining
+     * still fills the form from the scrape, so a genuinely separate copy of the
+     * same disc can still be entered.
+     */
+    private fun offerToLink(existing: ReleaseSummary, scraped: PhysicalMedia?) {
+        val name = existing.title?.takeIf { it.isNotBlank() } ?: "A release"
+        val films = if (existing.filmCount == 1) "1 film" else "${existing.filmCount} films"
+
+        confirmDialog.show(
+            title = "You already own this release",
+            message = "\"$name\" is already in your collection, on $films. " +
+                "Add this film to that release so they share one record, or enter a separate copy instead?",
+            confirmText = "Use existing release",
+            cancelText = "Enter separately",
+            onConfirm = {
+                // The selector renders the chosen release as a card of its own,
+                // which is the visible confirmation here - the fetch status line
+                // sits inside the block that linking hides.
+                releaseSelector?.selectRelease(existing)
+            },
+            onCancel = {
+                if (scraped != null) {
+                    applyScrapedData(scraped)
+                    setFetchStatus("Details loaded. Review and edit before saving.", "#188038")
+                }
+            }
+        )
     }
 
     /**
@@ -749,6 +872,8 @@ class PhysicalMediaForm(
 
     private fun handleSave() {
         try {
+            val linked = linkedRelease
+
             // Collect selected media types from checkboxes
             val mediaTypeCheckboxes = document.querySelectorAll("input[name='media-type']:checked")
             val selectedMediaTypes = mutableListOf<MediaType>()
@@ -759,7 +884,9 @@ class PhysicalMediaForm(
                 }
             }
 
-            if (selectedMediaTypes.isEmpty()) {
+            // A linked entry takes its formats from the release it joins, so there
+            // is nothing for the user to pick here.
+            if (linked == null && selectedMediaTypes.isEmpty()) {
                 alertDialog.show(
                     title = "Validation Error",
                     message = "Please select at least one media type!"
@@ -801,19 +928,39 @@ class PhysicalMediaForm(
                 }
             }
 
-            val physicalMedia = PhysicalMedia(
-                mediaTypes = selectedMediaTypes,
-                entryLetter = entryLetter,
-                title = title,
-                alternateTitle = alternateTitle,
-                isCollection = isCollection,
-                distributor = distributor,
-                releaseDate = releaseDate,
-                blurayComUrl = blurayUrl,
-                location = location,
-                images = images,
-                id = editingMedia?.id
-            )
+            // When linked, the release supplies every shared field, so send its
+            // own values rather than the stale ones still sitting in the hidden
+            // inputs. The server keys off releaseId and ignores the rest.
+            val physicalMedia = if (linked != null) {
+                PhysicalMedia(
+                    mediaTypes = linked.mediaTypes,
+                    entryLetter = entryLetter,
+                    title = linked.title,
+                    alternateTitle = alternateTitle,
+                    isCollection = linked.isCollection,
+                    distributor = linked.distributor,
+                    releaseDate = linked.releaseDate,
+                    blurayComUrl = linked.blurayComUrl,
+                    location = linked.location,
+                    id = editingMedia?.id,
+                    releaseId = linked.id
+                )
+            } else {
+                PhysicalMedia(
+                    mediaTypes = selectedMediaTypes,
+                    entryLetter = entryLetter,
+                    title = title,
+                    alternateTitle = alternateTitle,
+                    isCollection = isCollection,
+                    distributor = distributor,
+                    releaseDate = releaseDate,
+                    blurayComUrl = blurayUrl,
+                    location = location,
+                    images = images,
+                    id = editingMedia?.id,
+                    releaseId = editingMedia?.releaseId
+                )
+            }
 
             mainScope.launch {
                 try {

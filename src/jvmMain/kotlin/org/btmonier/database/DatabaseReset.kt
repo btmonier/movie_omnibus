@@ -38,9 +38,10 @@ class DatabaseReset : CliktCommand(name = "reset-database") {
             // Drop tables in reverse order to handle foreign key constraints
             SchemaUtils.drop(
                 WatchedEntries,
-                PhysicalMediaImages,
-                PhysicalMediaTypes,
-                PhysicalMedia,
+                ReleaseImages,
+                ReleaseMediaTypes,
+                ReleaseMovies,
+                Releases,
                 MovieCrew,
                 MovieCast,
                 MovieCountries,
@@ -69,9 +70,10 @@ class DatabaseReset : CliktCommand(name = "reset-database") {
                 MovieCountries,
                 MovieCast,
                 MovieCrew,
-                PhysicalMedia,
-                PhysicalMediaTypes,
-                PhysicalMediaImages,
+                Releases,
+                ReleaseMovies,
+                ReleaseMediaTypes,
+                ReleaseImages,
                 WatchedEntries
             )
         }

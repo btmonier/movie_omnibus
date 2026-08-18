@@ -25,12 +25,17 @@ object DatabaseFactory {
         }
     }
 
+    /**
+     * @param skipReleaseMigration Leave the physical media rows alone, so the
+     *   migrateReleases task can run (and preview) the fold itself.
+     */
     fun init(
         jdbcUrl: String? = null,
         driverClassName: String? = null,
         username: String? = null,
         password: String? = null,
-        maximumPoolSize: Int? = null
+        maximumPoolSize: Int? = null,
+        skipReleaseMigration: Boolean = false
     ) {
         val props = loadProperties()
 
@@ -92,9 +97,10 @@ object DatabaseFactory {
                 MovieCountries,
                 MovieCast,
                 MovieCrew,
-                PhysicalMedia,
-                PhysicalMediaTypes,
-                PhysicalMediaImages,
+                Releases,
+                ReleaseMovies,
+                ReleaseMediaTypes,
+                ReleaseImages,
                 WatchedEntries
             )
         }
@@ -104,6 +110,11 @@ object DatabaseFactory {
 
         // Convert any remaining inline category strings into lookup table references
         CategoryMigration.migrateCategoriesToLookupTables(database)
+
+        // Collapse the old per-movie physical_media rows into shared releases
+        if (!skipReleaseMigration) {
+            ReleaseMigration.migratePhysicalMediaToReleases(database)
+        }
     }
 
     private fun createHikariDataSource(

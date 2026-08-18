@@ -18,6 +18,7 @@ import org.btmonier.database.CategoryDao
 import org.btmonier.database.DatabaseFactory
 import org.btmonier.database.MovieDao
 import org.btmonier.database.PhysicalMediaDao
+import org.btmonier.database.ReleaseDao
 import org.btmonier.storage.GcsService
 import org.slf4j.event.Level
 import java.io.File
@@ -147,6 +148,7 @@ fun Application.configureServer() {
     // Initialize DAOs with GCS service for URL signing
     val movieDao = MovieDao(gcsService)
     val physicalMediaDao = PhysicalMediaDao(gcsService)
+    val releaseDao = ReleaseDao(gcsService)
     val categoryDao = CategoryDao()
 
     // Configure JSON serialization
@@ -207,7 +209,8 @@ fun Application.configureServer() {
     routing {
         // API routes
         movieRoutes(movieDao)
-        physicalMediaRoutes(movieDao, physicalMediaDao)
+        physicalMediaRoutes(movieDao, physicalMediaDao, releaseDao)
+        releaseRoutes(releaseDao, movieDao)
         watchedRoutes()
         genreRoutes(categoryDao)
         collectionRoutes(categoryDao)
@@ -235,9 +238,19 @@ fun Application.configureServer() {
                     "PUT /api/movies/{id} - Update movie",
                     "DELETE /api/movies/{id} - Delete movie",
                     "GET /api/movies/{id}/physical-media - Get physical media for movie",
-                    "POST /api/movies/{id}/physical-media - Add physical media to movie",
-                    "PUT /api/physical-media/{id} - Update physical media entry",
-                    "DELETE /api/physical-media/{id} - Delete physical media entry",
+                    "POST /api/movies/{id}/physical-media - Add physical media to movie (pass releaseId to link a shared release)",
+                    "PUT /api/physical-media/{id} - Update physical media entry (release fields affect every film on it)",
+                    "DELETE /api/physical-media/{id} - Take this movie off the release",
+                    "GET /api/releases - Browse releases (paginated)",
+                    "GET /api/releases/search?q={query} - Find releases to link to",
+                    "GET /api/releases/by-bluray-url?url={url} - Find a release already recorded under a blu-ray.com URL",
+                    "GET /api/releases/{id} - Get a release with its films",
+                    "GET /api/releases/{id}/movies - Get the films on a release (paginated)",
+                    "POST /api/releases - Create a release",
+                    "PUT /api/releases/{id} - Update a release",
+                    "DELETE /api/releases/{id} - Delete a release",
+                    "POST /api/releases/{id}/movies - Put a film on a release",
+                    "DELETE /api/releases/{id}/movies/{movieId} - Take a film off a release",
                     "GET /api/movies/{id}/watched - Get watched entries for movie",
                     "POST /api/movies/{id}/watched - Add watched entry to movie",
                     "PUT /api/watched/{id} - Update watched entry",

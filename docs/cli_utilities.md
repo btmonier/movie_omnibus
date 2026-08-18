@@ -114,6 +114,31 @@ Bulk scrape movie metadata from Letterboxd URLs in a CSV file.
 ./gradlew backupDatabase
 ```
 
+### Migrate Releases
+
+Fold the old per-film physical media rows into shared releases, so a box set is stored once instead of once per film on it. `runServer` does this automatically on startup; this task exists to preview the grouping first.
+
+```bash
+# Back up before the first run
+./gradlew backupDatabase
+
+# Report what would be merged, without writing
+./gradlew migrateReleases --args="--dry-run"
+
+# List every shared release rather than the ten largest
+./gradlew migrateReleases --args="--dry-run --verbose"
+
+# Apply it
+./gradlew migrateReleases
+```
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Report the grouping without writing anything |
+| `--verbose` | List every release shared by more than one film |
+
+The old tables are renamed to `physical_media_legacy` and friends rather than dropped, so the original data survives for verification. Repeat runs do nothing. See [Migrating to shared releases](DATABASE_SETUP.md#migrating-to-shared-releases) for how rows are grouped.
+
 ## Server
 
 ```bash

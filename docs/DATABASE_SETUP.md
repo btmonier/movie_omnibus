@@ -97,10 +97,22 @@ The following tables will be created:
 | `movie_countries` | Movie countries of origin |
 | `movie_cast` | Cast members |
 | `movie_crew` | Crew members with roles |
-| `physical_media` | Physical media entries (Blu-ray, DVD, etc.) |
-| `physical_media_types` | Media types for each physical media entry |
-| `physical_media_images` | Images of physical media |
+| `releases` | Physical releases - one row per owned unit, however many films it holds |
+| `release_movies` | Links films to the releases they appear on, with entry letter and alternate title |
+| `release_media_types` | Formats for each release (Blu-ray, DVD, ...) |
+| `release_images` | Cover art and other images of a release |
 | `watched_entries` | Watch history with dates, ratings, and notes |
+
+### Shared releases
+
+A release is stored once regardless of how many films are on it, so a 200-film box set is a single `releases` row with 200 `release_movies` links rather than 200 copies of the same details. Everything describing the physical object lives on the release; only the entry letter and the alternate title are per film.
+
+Two consequences are worth knowing:
+
+- Editing the release-level fields of a movie's physical media entry updates every film on that release.
+- Deleting an entry only takes that film off the release; the release survives for its other films.
+
+This replaces the older `physical_media` / `physical_media_types` / `physical_media_images` tables. See [Migrating to shared releases](#migrating-to-shared-releases) below.
 
 ## Running the Application
 
@@ -176,6 +188,61 @@ If you have existing JSON files from the scraper, you can import them into the d
 ./gradlew migrateData --args="--input output/movies.json"
 ```
 
+### Migrating to shared releases
+
+Physical media used to be stored once **per film**, so a box set repeated its title, distributor, date, cover art and shelf location for every film on it. This migration folds those rows into shared `releases`.
+
+`DatabaseFactory.init()` runs it automatically, so a normal `./gradlew runServer` migrates on startup. To preview it first:
+
+> **Back up before the first run.** The migration rewrites how all of your physical media is stored.
+
+```bash
+# 1. Back up
+./gradlew backupDatabase
+
+# 2. See what would be merged, without writing anything
+./gradlew migrateReleases --args="--dry-run"
+
+# 3. List every shared release rather than just the ten largest
+./gradlew migrateReleases --args="--dry-run --verbose"
+
+# 4. Apply it
+./gradlew migrateReleases
+```
+
+The dry run reports how many rows collapse into how many releases, names the releases shared by more than one film, and prints every field where the merged rows disagreed along with the value it will keep:
+
+```
+Folding 510 physical media row(s) into 401 release(s)...
+  51 release(s) are shared by more than one film (109 duplicate row(s) removed)
+    10 films: Drive-In Cult Classics Collection
+    10 films: The Three Stooges in Public Do-Mania
+  conflict on title for "The [REC] Collection": The [REC] Collection, The [REC] Collection Blu-ray - keeping "The [REC] Collection"
+Dry run: no changes written.
+```
+
+#### How rows are grouped
+
+Most specific signal first:
+
+1. A blu-ray.com URL, normalized to its section and numeric release id. Two rows pointing at the same release page are the same physical object even if their title slugs differ. This is what catches box sets.
+2. Otherwise the title, together with distributor, release date and formats.
+3. Rows with neither a URL nor a title stay on their own.
+
+That last rule is deliberately conservative: merging two untitled rows just because they share a distributor would silently fuse unrelated films. Some genuine duplicates will therefore survive as separate releases, which you can merge afterwards from the browse view - the safer failure direction for hand-curated data.
+
+Where merged rows disagree on a shared field, the most common non-null value wins. Media types and images are the deduplicated union of the group.
+
+#### Afterwards
+
+The old tables are renamed rather than dropped, so the original data is available to check against:
+
+- `physical_media_legacy`
+- `physical_media_types_legacy`
+- `physical_media_images_legacy`
+
+Drop them yourself once you are satisfied. The migration is idempotent - with `physical_media` gone, repeat runs do nothing.
+
 ## Web Interface
 
 ### Features
@@ -220,6 +287,19 @@ Track your physical movie collection:
 - **Location**: Where it's stored (Archive, Shelf, etc.)
 - **Images**: Upload cover art and photos
 - **Blu-ray.com Link**: Link to Blu-ray.com listing
+
+**Existing release picker**: at the top of the Add Physical Media form, search for a release you already own and this film joins it. Everything except Entry Letter and Alternate Title then comes from the shared release, so a box set never has to be typed in twice. Fetching from a blu-ray.com URL that is already recorded offers the same choice automatically.
+
+An entry on a shared release shows a "Shared with N films" chip. Editing its release-level fields updates all N; deleting it only takes this film off the release.
+
+#### Browsing by Release
+
+The **"Releases"** button in the navbar shows the collection from the other direction - one card per physical unit, with a badge for how many films it holds:
+
+- **Filter** by search text, format, distributor, location, or box sets only
+- **Sort** by title, film count, release date, or date added
+- **Open a release** to see its cover, metadata and film list. That list has its own search and pagination, so a several-hundred-film set stays browsable.
+- **Add or remove films** on a release, or delete the release outright
 
 #### Watched Entries
 
@@ -283,12 +363,49 @@ http://localhost:8080/api
 
 ### Physical Media Endpoints
 
+These address one movie's copy of a release, so `{id}` is the film-to-release link rather than the release itself.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/movies/{id}/physical-media` | Get physical media for movie |
-| POST | `/api/movies/{id}/physical-media` | Add physical media to movie |
-| PUT | `/api/physical-media/{id}` | Update physical media entry |
-| DELETE | `/api/physical-media/{id}` | Delete physical media entry |
+| GET | `/api/movies/{id}/physical-media` | Get this movie's copies |
+| POST | `/api/movies/{id}/physical-media` | Add a copy; pass `releaseId` to join an existing release instead of creating one |
+| PUT | `/api/physical-media/{id}` | Update; release-level fields change for every film on the release |
+| DELETE | `/api/physical-media/{id}` | Take this movie off the release, leaving the release intact |
+
+### Release Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/releases` | Paginated browse (`search`, `mediaType`, `distributor`, `location`, `collectionsOnly`, `sortField`, `sortDirection`) |
+| GET | `/api/releases/{id}` | Get one release with its films |
+| GET | `/api/releases/{id}/movies` | Paginated, searchable film list (`page`, `pageSize`, `search`) |
+| GET | `/api/releases/search?q={query}` | Typeahead over title, distributor and blu-ray.com URL |
+| GET | `/api/releases/by-bluray-url?url={url}` | The release already recorded under a blu-ray.com URL, if any |
+| POST | `/api/releases` | Create a release |
+| PUT | `/api/releases/{id}` | Update a release |
+| DELETE | `/api/releases/{id}` | Delete a release and take every film off it |
+| POST | `/api/releases/{id}/movies` | Put a film on a release |
+| DELETE | `/api/releases/{id}/movies/{movieId}` | Take a film off a release |
+
+Browse releases:
+
+```bash
+curl "http://localhost:8080/api/releases?sortField=film_count&sortDirection=desc&pageSize=5"
+```
+
+List the films on one:
+
+```bash
+curl "http://localhost:8080/api/releases/126/movies?page=1&pageSize=25&search=alien"
+```
+
+Add a film to a release you already own, rather than re-entering it:
+
+```bash
+curl -X POST http://localhost:8080/api/movies/42/physical-media \
+  -H "Content-Type: application/json" \
+  -d '{"mediaTypes": [], "releaseId": 126, "entryLetter": "A"}'
+```
 
 ### Watched Entry Endpoints
 

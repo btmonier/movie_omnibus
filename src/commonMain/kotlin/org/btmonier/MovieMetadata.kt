@@ -25,7 +25,15 @@ data class PhysicalMediaImage(
 )
 
 /**
- * Data class for physical media entries
+ * One movie's copy of a physical release.
+ *
+ * This is a flattened view of a release joined with the link that ties it to a
+ * single film: the release-level fields ([title], [distributor], [mediaTypes],
+ * [images], ...) are shared with every other film on the same release, while
+ * [entryLetter] and [alternateTitle] belong to this film alone.
+ *
+ * [id] identifies the film-to-release link, so editing or removing an entry
+ * always addresses "this film's copy" rather than the release itself.
  */
 @Serializable
 data class PhysicalMedia(
@@ -39,8 +47,63 @@ data class PhysicalMedia(
     val blurayComUrl: String? = null,
     val location: String? = null,  // Archive or Shelf
     val images: List<PhysicalMediaImage> = emptyList(),
-    val id: Int? = null,  // Database ID
-    val createdAt: String? = null  // ISO datetime string, auto-set on insert
+    val id: Int? = null,  // Database ID of the film-to-release link
+    val createdAt: String? = null,  // ISO datetime string, auto-set on insert
+    val releaseId: Int? = null,  // The shared release this entry is a view of
+    val sharedWithCount: Int = 0  // Other films on the same release
+)
+
+/**
+ * A film on a release, as listed by the release browser.
+ */
+@Serializable
+data class ReleaseFilm(
+    val movieId: Int,
+    val title: String,
+    val releaseYear: Int? = null,
+    val entryLetter: String? = null,
+    val alternateTitle: String? = null,
+    val linkId: Int? = null  // Database ID of the film-to-release link
+)
+
+/**
+ * A physical release with its films. Used by the release detail view and by the
+ * create/update endpoints.
+ */
+@Serializable
+data class Release(
+    val mediaTypes: List<MediaType> = emptyList(),
+    val title: String? = null,
+    val isCollection: Boolean = false,
+    val distributor: String? = null,
+    val releaseDate: String? = null,  // ISO date string (YYYY-MM-DD)
+    val blurayComUrl: String? = null,
+    val location: String? = null,  // Archive or Shelf
+    val images: List<PhysicalMediaImage> = emptyList(),
+    val films: List<ReleaseFilm> = emptyList(),
+    val filmCount: Int = 0,
+    val id: Int? = null,
+    val createdAt: String? = null
+)
+
+/**
+ * A release as shown in the browse grid. Deliberately carries only [filmCount]
+ * rather than the films themselves, so listing a page of releases never ships
+ * the several hundred film records a large box set would otherwise pull in.
+ */
+@Serializable
+data class ReleaseSummary(
+    val id: Int,
+    val title: String? = null,
+    val isCollection: Boolean = false,
+    val distributor: String? = null,
+    val releaseDate: String? = null,
+    val blurayComUrl: String? = null,
+    val location: String? = null,
+    val mediaTypes: List<MediaType> = emptyList(),
+    val coverUrl: String? = null,
+    val filmCount: Int = 0,
+    val sampleTitles: List<String> = emptyList()  // A few film titles, for the card subtitle
 )
 
 /**
@@ -72,6 +135,16 @@ fun bluRayCoverImageUrl(blurayComUrl: String?): String? {
  * blu-ray.com front cover so the cover always shows for blu-ray.com entries.
  */
 fun PhysicalMedia.displayImages(): List<PhysicalMediaImage> {
+    if (images.isNotEmpty()) return images
+    val cover = bluRayCoverImageUrl(blurayComUrl) ?: return emptyList()
+    return listOf(PhysicalMediaImage(imageUrl = cover, description = "Front Cover"))
+}
+
+/**
+ * The images to display for a release, with the same blu-ray.com cover fallback
+ * as [PhysicalMedia.displayImages].
+ */
+fun Release.displayImages(): List<PhysicalMediaImage> {
     if (images.isNotEmpty()) return images
     val cover = bluRayCoverImageUrl(blurayComUrl) ?: return emptyList()
     return listOf(PhysicalMediaImage(imageUrl = cover, description = "Front Cover"))

@@ -1,36 +1,44 @@
 package org.btmonier.database
 
 import org.btmonier.MediaType
-import org.btmonier.PhysicalMediaImage
+import org.btmonier.Release
 import org.btmonier.storage.GcsService
-import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import java.time.LocalDate
 import org.btmonier.PhysicalMedia as PhysicalMediaEntity
 
 /**
- * Data Access Object for physical media database operations.
- * 
+ * Data Access Object for one movie's copies of physical releases.
+ *
+ * A [PhysicalMediaEntity] is a flattened view of a release joined with the link
+ * that ties it to a single film, so its `id` is the link id: editing or deleting
+ * an entry always addresses "this film's copy". Release-level edits write
+ * through to the release and therefore affect every film on it.
+ *
  * @param gcsService Optional GCS service for transforming image URLs to signed URLs.
  *                   If null, image URLs are returned as-is from the database.
  */
-class PhysicalMediaDao(private val gcsService: GcsService? = null) {
-    private val categoryDao = CategoryDao()
+class PhysicalMediaDao(gcsService: GcsService? = null) {
+    private val releaseDao = ReleaseDao(gcsService)
 
     /**
      * Get all physical media entries for a specific movie.
      */
     suspend fun getPhysicalMediaForMovie(movieId: Int): List<PhysicalMediaEntity> = DatabaseFactory.dbQuery {
-        PhysicalMedia.selectAll().where { PhysicalMedia.movieId eq movieId }
+        (ReleaseMovies innerJoin Releases)
+            .selectAll()
+            .where { ReleaseMovies.movieId eq movieId }
             .map { rowToPhysicalMedia(it) }
+            .sortedBy { it.entryLetter ?: "\uFFFF" }
     }
 
     /**
-     * Get a specific physical media entry by its ID.
+     * Get a specific entry by its link id.
      */
     suspend fun getPhysicalMediaById(id: Int): PhysicalMediaEntity? = DatabaseFactory.dbQuery {
-        PhysicalMedia.selectAll().where { PhysicalMedia.id eq id }
+        (ReleaseMovies innerJoin Releases)
+            .selectAll()
+            .where { ReleaseMovies.id eq id }
             .map { rowToPhysicalMedia(it) }
             .singleOrNull()
     }
@@ -39,197 +47,117 @@ class PhysicalMediaDao(private val gcsService: GcsService? = null) {
      * Get all movies that have a specific media type.
      */
     suspend fun getMovieIdsByMediaType(mediaType: MediaType): List<Int> = DatabaseFactory.dbQuery {
-        val mediaTypeString = mediaTypeToString(mediaType)
-
-        // Get all physical media IDs that have this media type
-        val physicalMediaIds = PhysicalMediaTypes.selectAll()
-            .where { PhysicalMediaTypes.mediaType eq mediaTypeString }
-            .map { it[PhysicalMediaTypes.physicalMediaId].value }
+        val releaseIds = ReleaseMediaTypes.selectAll()
+            .where { ReleaseMediaTypes.mediaType eq mediaTypeToString(mediaType) }
+            .map { it[ReleaseMediaTypes.releaseId].value }
             .distinct()
 
-        // Get all movie IDs for these physical media entries
-        PhysicalMedia.selectAll()
-            .where { PhysicalMedia.id inList physicalMediaIds }
-            .map { it[PhysicalMedia.movieId].value }
+        ReleaseMovies.selectAll()
+            .where { ReleaseMovies.releaseId inList releaseIds }
+            .map { it[ReleaseMovies.movieId].value }
             .distinct()
     }
 
     /**
-     * Create a new physical media entry for a movie.
+     * Add a copy of a release to a movie.
+     *
+     * When [physicalMedia] carries a `releaseId` the movie is simply linked to
+     * that existing release, so a box set is entered once and shared from then
+     * on. Otherwise a new release is created from the supplied fields.
+     *
+     * Returns the link id.
      */
     suspend fun createPhysicalMedia(movieId: Int, physicalMedia: PhysicalMediaEntity): Int = DatabaseFactory.dbQuery {
-        val distributor = resolveDistributor(physicalMedia.distributor)
+        with(releaseDao) {
+            val releaseId = physicalMedia.releaseId
+                ?.takeIf { Releases.selectAll().where { Releases.id eq it }.any() }
+                ?: createReleaseInTransaction(physicalMedia.toRelease())
 
-        val mediaId = PhysicalMedia.insertAndGetId {
-            it[PhysicalMedia.movieId] = movieId
-            it[entryLetter] = physicalMedia.entryLetter
-            it[title] = physicalMedia.title
-            it[alternateTitle] = physicalMedia.alternateTitle
-            it[isCollection] = physicalMedia.isCollection
-            it[distributorId] = distributor
-            it[releaseDate] = physicalMedia.releaseDate?.let { date -> LocalDate.parse(date) }
-            it[blurayComUrl] = physicalMedia.blurayComUrl
-            it[location] = physicalMedia.location
+            linkMovieInTransaction(
+                releaseId = releaseId,
+                movieId = movieId,
+                entryLetter = physicalMedia.entryLetter,
+                alternateTitle = physicalMedia.alternateTitle
+            ) ?: error("Release $releaseId disappeared while linking movie $movieId")
         }
-
-        // Insert media types
-        insertMediaTypes(mediaId.value, physicalMedia.mediaTypes)
-
-        // Insert images
-        insertImages(mediaId.value, physicalMedia.images)
-
-        mediaId.value
     }
 
     /**
-     * Update an existing physical media entry.
+     * Update an entry by its link id.
+     *
+     * The entry letter and alternate title are written to this film's link; every
+     * other field belongs to the release and so is shared with any other film on
+     * it.
      */
     suspend fun updatePhysicalMedia(id: Int, physicalMedia: PhysicalMediaEntity): Boolean = DatabaseFactory.dbQuery {
-        val distributor = resolveDistributor(physicalMedia.distributor)
+        val link = ReleaseMovies.selectAll().where { ReleaseMovies.id eq id }.singleOrNull()
+            ?: return@dbQuery false
 
-        val updated = PhysicalMedia.update({ PhysicalMedia.id eq id }) {
+        ReleaseMovies.update({ ReleaseMovies.id eq id }) {
             it[entryLetter] = physicalMedia.entryLetter
-            it[title] = physicalMedia.title
             it[alternateTitle] = physicalMedia.alternateTitle
-            it[isCollection] = physicalMedia.isCollection
-            it[distributorId] = distributor
-            it[releaseDate] = physicalMedia.releaseDate?.let { date -> LocalDate.parse(date) }
-            it[blurayComUrl] = physicalMedia.blurayComUrl
-            it[location] = physicalMedia.location
         }
 
-        if (updated > 0) {
-            // Delete old media types and insert new ones
-            PhysicalMediaTypes.deleteWhere(op = { PhysicalMediaTypes.physicalMediaId.eq(id) })
-            insertMediaTypes(id, physicalMedia.mediaTypes)
-
-            // Delete old images and insert new ones
-            PhysicalMediaImages.deleteWhere(op = { PhysicalMediaImages.physicalMediaId.eq(id) })
-            insertImages(id, physicalMedia.images)
+        with(releaseDao) {
+            updateReleaseInTransaction(link[ReleaseMovies.releaseId].value, physicalMedia.toRelease())
         }
-
-        updated > 0
     }
 
     /**
-     * Delete a physical media entry and its associated images.
+     * Take this film off the release. The release itself survives so the other
+     * films on a box set are untouched.
      */
     suspend fun deletePhysicalMedia(id: Int): Boolean = DatabaseFactory.dbQuery {
-        // Delete related data first (due to foreign key constraints)
-        PhysicalMediaTypes.deleteWhere(op = { PhysicalMediaTypes.physicalMediaId.eq(id) })
-        PhysicalMediaImages.deleteWhere(op = { PhysicalMediaImages.physicalMediaId.eq(id) })
-
-        // Delete the physical media entry
-        val deleted = PhysicalMedia.deleteWhere(op = { PhysicalMedia.id.eq(id) })
-        deleted > 0
+        ReleaseMovies.deleteWhere(op = { ReleaseMovies.id.eq(id) }) > 0
     }
 
     /**
-     * Delete all physical media entries for a specific movie.
+     * Take a movie off every release it appears on. Releases left without films
+     * remain, and stay visible (and deletable) in the release browser.
      */
     suspend fun deleteAllPhysicalMediaForMovie(movieId: Int): Int = DatabaseFactory.dbQuery {
-        // Get all physical media IDs for this movie
-        val mediaIds = PhysicalMedia.selectAll().where { PhysicalMedia.movieId eq movieId }
-            .map { it[PhysicalMedia.id].value }
-
-        // Delete all related data for these media entries
-        mediaIds.forEach { mediaId ->
-            PhysicalMediaTypes.deleteWhere(op = { PhysicalMediaTypes.physicalMediaId.eq(mediaId) })
-            PhysicalMediaImages.deleteWhere(op = { PhysicalMediaImages.physicalMediaId.eq(mediaId) })
-        }
-
-        // Delete all physical media entries for this movie
-        PhysicalMedia.deleteWhere(op = { PhysicalMedia.movieId.eq(movieId) })
-    }
-
-    // Helper function to insert media types for a physical media entry
-    private fun insertMediaTypes(physicalMediaId: Int, mediaTypes: List<MediaType>) {
-        mediaTypes.forEach { type ->
-            PhysicalMediaTypes.insert {
-                it[PhysicalMediaTypes.physicalMediaId] = physicalMediaId
-                it[mediaType] = mediaTypeToString(type)
-            }
-        }
-    }
-
-    // Helper function to insert images for a physical media entry
-    private fun insertImages(physicalMediaId: Int, images: List<PhysicalMediaImage>) {
-        images.forEach { image ->
-            // Clean the image URL before saving - converts signed GCS URLs back to storable paths
-            val cleanedUrl = gcsService?.cleanUrlForStorage(image.imageUrl) ?: image.imageUrl
-            PhysicalMediaImages.insert {
-                it[PhysicalMediaImages.physicalMediaId] = physicalMediaId
-                it[imageUrl] = cleanedUrl
-                it[description] = image.description
-            }
-        }
+        ReleaseMovies.deleteWhere(op = { ReleaseMovies.movieId.eq(movieId) })
     }
 
     /**
-     * Resolve a distributor name to its entry in the global distributors list,
-     * adding it when it is new. Blank names mean "no distributor".
+     * Projects a joined release/link row into the flat per-film view.
      */
-    private fun resolveDistributor(name: String?): EntityID<Int>? =
-        name?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?.let { EntityID(categoryDao.getOrCreateInTransaction(CategoryType.DISTRIBUTOR, it), Distributors) }
-
-    // Helper function to convert a database row to PhysicalMedia
     private fun rowToPhysicalMedia(row: ResultRow): PhysicalMediaEntity {
-        val mediaId = row[PhysicalMedia.id].value
-
-        val distributorName = row[PhysicalMedia.distributorId]?.let { distributorId ->
-            Distributors.selectAll().where { Distributors.id eq distributorId.value }
-                .map { it[Distributors.name] }
-                .singleOrNull()
+        val releaseId = row[Releases.id].value
+        return with(releaseDao) {
+            PhysicalMediaEntity(
+                mediaTypes = mediaTypesFor(releaseId),
+                entryLetter = row[ReleaseMovies.entryLetter],
+                title = row[Releases.title],
+                alternateTitle = row[ReleaseMovies.alternateTitle],
+                isCollection = row[Releases.isCollection] ?: false,
+                distributor = distributorName(row[Releases.distributorId]),
+                releaseDate = row[Releases.releaseDate]?.toString(),
+                blurayComUrl = row[Releases.blurayComUrl],
+                location = row[Releases.location],
+                images = imagesFor(releaseId),
+                id = row[ReleaseMovies.id].value,
+                createdAt = row[Releases.createdAt].toString(),
+                releaseId = releaseId,
+                sharedWithCount = (filmCountFor(releaseId) - 1).coerceAtLeast(0)
+            )
         }
-
-        val mediaTypes = PhysicalMediaTypes.selectAll().where { PhysicalMediaTypes.physicalMediaId eq mediaId }
-            .map { stringToMediaType(it[PhysicalMediaTypes.mediaType]) }
-
-        val images = PhysicalMediaImages.selectAll().where { PhysicalMediaImages.physicalMediaId eq mediaId }
-            .map {
-                val rawImageUrl = it[PhysicalMediaImages.imageUrl]
-                // Transform GCS paths to signed URLs if GCS service is configured
-                val transformedUrl = gcsService?.transformUrl(rawImageUrl) ?: rawImageUrl
-                PhysicalMediaImage(
-                    imageUrl = transformedUrl,
-                    description = it[PhysicalMediaImages.description],
-                    id = it[PhysicalMediaImages.id].value
-                )
-            }
-
-        return PhysicalMediaEntity(
-            mediaTypes = mediaTypes,
-            entryLetter = row[PhysicalMedia.entryLetter],
-            title = row[PhysicalMedia.title],
-            alternateTitle = row[PhysicalMedia.alternateTitle],
-            isCollection = row[PhysicalMedia.isCollection] ?: false,
-            distributor = distributorName,
-            releaseDate = row[PhysicalMedia.releaseDate]?.toString(),
-            blurayComUrl = row[PhysicalMedia.blurayComUrl],
-            location = row[PhysicalMedia.location],
-            images = images,
-            id = mediaId,
-            createdAt = row[PhysicalMedia.createdAt].toString()
-        )
-    }
-
-    // Helper functions to convert between MediaType enum and String
-    private fun mediaTypeToString(mediaType: MediaType): String = when (mediaType) {
-        MediaType.VHS -> "VHS"
-        MediaType.DVD -> "DVD"
-        MediaType.BLURAY -> "Blu-ray"
-        MediaType.FOURK -> "4K"
-        MediaType.DIGITAL -> "Digital"
-    }
-
-    private fun stringToMediaType(str: String): MediaType = when (str) {
-        "VHS" -> MediaType.VHS
-        "DVD" -> MediaType.DVD
-        "Blu-ray" -> MediaType.BLURAY
-        "4K" -> MediaType.FOURK
-        "Digital" -> MediaType.DIGITAL
-        else -> throw IllegalArgumentException("Unknown media type: $str")
     }
 }
+
+/**
+ * The release-level half of a per-film entry, for writing back to the shared
+ * release. Films are left empty: linking is handled separately so an update
+ * never disturbs the other films on the release.
+ */
+private fun PhysicalMediaEntity.toRelease(): Release = Release(
+    mediaTypes = mediaTypes,
+    title = title,
+    isCollection = isCollection,
+    distributor = distributor,
+    releaseDate = releaseDate,
+    blurayComUrl = blurayComUrl,
+    location = location,
+    images = images,
+    id = releaseId
+)

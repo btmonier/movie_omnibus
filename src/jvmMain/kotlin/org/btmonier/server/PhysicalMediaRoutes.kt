@@ -9,8 +9,10 @@ import kotlinx.serialization.Serializable
 import org.btmonier.BluRayComUtils
 import org.btmonier.MediaType
 import org.btmonier.PhysicalMedia
+import org.btmonier.ReleaseSummary
 import org.btmonier.database.MovieDao
 import org.btmonier.database.PhysicalMediaDao
+import org.btmonier.database.ReleaseDao
 import org.jsoup.Jsoup
 
 /**
@@ -22,18 +24,26 @@ data class BluRayScrapeRequest(val url: String)
 /**
  * Response for the physical media scrape endpoint. Returns a preview
  * [PhysicalMedia] (no database id) that the client uses to prefill the form.
+ *
+ * [existingRelease] is set when the scraped URL is already recorded, so the
+ * client can offer to link that release rather than entering it a second time.
  */
 @Serializable
 data class PhysicalMediaScrapeResponse(
     val success: Boolean,
     val physicalMedia: PhysicalMedia? = null,
+    val existingRelease: ReleaseSummary? = null,
     val error: String? = null
 )
 
 /**
  * Configure physical media-related API routes.
+ *
+ * These endpoints work in terms of one movie's copy of a release. Creating an
+ * entry with a `releaseId` links the movie to that shared release instead of
+ * duplicating it, and deleting one only takes that movie off the release.
  */
-fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMediaDao) {
+fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMediaDao, releaseDao: ReleaseDao) {
 
     // POST /api/physical-media/scrape - Scrape physical media details from a
     // blu-ray.com release URL. This is a preview only; nothing is persisted.
@@ -68,7 +78,8 @@ fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMedi
 
                 call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
                     success = true,
-                    physicalMedia = physicalMedia
+                    physicalMedia = physicalMedia,
+                    existingRelease = releaseDao.findByBluRayUrl(url)
                 ))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
@@ -103,7 +114,9 @@ fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMedi
         call.respond(HttpStatusCode.OK, physicalMedia)
     }
 
-    // POST /api/movies/{id}/physical-media - Create new physical media for a movie
+    // POST /api/movies/{id}/physical-media - Give a movie a copy of a release.
+    // A releaseId in the body links the movie to that existing release; without
+    // one a new release is created from the supplied fields.
     post("/api/movies/{id}/physical-media") {
         val movieId = call.parameters["id"]?.toIntOrNull()
         if (movieId == null) {
@@ -134,7 +147,9 @@ fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMedi
         }
     }
 
-    // PUT /api/physical-media/{id} - Update a physical media entry
+    // PUT /api/physical-media/{id} - Update a movie's copy of a release. Entry
+    // letter and alternate title apply to this movie only; every other field
+    // belongs to the release and so changes for every film on it.
     put("/api/physical-media/{id}") {
         val id = call.parameters["id"]?.toIntOrNull()
         if (id == null) {
@@ -157,7 +172,8 @@ fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMedi
         }
     }
 
-    // DELETE /api/physical-media/{id} - Delete a physical media entry
+    // DELETE /api/physical-media/{id} - Take this movie off the release. The
+    // release survives so any other films on it are untouched.
     delete("/api/physical-media/{id}") {
         val id = call.parameters["id"]?.toIntOrNull()
         if (id == null) {

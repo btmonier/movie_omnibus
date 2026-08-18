@@ -36,6 +36,7 @@ To run the steps by hand instead:
 * Add, edit, delete movies with full metadata
 * Auto-fetch movie data from Letterboxd URLs
 * Track physical media - VHS, DVD, Blu-ray, 4K, and Digital
+* Browse by release to see which films are on each box set, and enter a box set once instead of once per film
 * Log viewings with dates, ratings, and notes
 * Search and filter by title, genre, country, media type
 * Get random unwatched movie suggestions with filters!

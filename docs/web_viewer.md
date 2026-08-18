@@ -36,6 +36,14 @@ Changing pages scrolls back to the top of the list.
 - **Entry Organization**: Use letters (A, B, C) to organize multiple copies
 - **Detailed Information**: Distributor, release date, location, Blu-ray.com links
 - **Image Gallery**: Upload and view cover art and media photos
+- **Shared Releases**: A release is stored once however many films are on it, so a box set is never typed in twice. Search for one you already own in the "Existing release" picker and the film joins it.
+
+### Browsing by Release
+- **Releases View**: The "Releases" navbar button shows one cover-art card per physical unit, badged with its film count
+- **Filters**: Search text, format, distributor, location, or box sets only
+- **Sorting**: By title, film count, release date, or date added
+- **Release Detail**: Cover, metadata, and a searchable, paginated list of the films on that release, so several-hundred-film sets stay usable
+- **Editing**: Add or remove films on a release, or delete the release outright
 
 ### Watch History
 - **Track Viewings**: Record when you watched each movie

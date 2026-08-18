@@ -156,7 +156,38 @@ class MovieTable(private val container: Element) {
                     // Nav links
                     div {
                         style = "display: flex; align-items: center; gap: 8px;"
-                        
+
+                        // Releases button
+                        a {
+                            style = """
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                padding: 10px 16px;
+                                font-size: 14px;
+                                font-weight: 500;
+                                cursor: pointer;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                text-decoration: none;
+                                transition: transform 0.2s, box-shadow 0.2s;
+                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.5)'"
+                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.4)'"
+                            onClickFunction = { e ->
+                                e.preventDefault()
+                                showReleaseBrowser()
+                            }
+                            span {
+                                classes = setOf("mdi", "mdi-package-variant-closed")
+                                style = "font-size: 18px;"
+                            }
+                            span { +"Releases" }
+                        }
+
                         // Random button
                         a {
                             style = """
@@ -2163,5 +2194,9 @@ class MovieTable(private val container: Element) {
             render()
         })
         randomPicker.show()
+    }
+
+    private fun showReleaseBrowser() {
+        ReleaseBrowser(container, onBack = { render() }).show()
     }
 }

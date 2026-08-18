@@ -410,6 +410,13 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                                                 +"Collection"
                                             }
                                         }
+                                        if (media.sharedWithCount > 0) {
+                                            span {
+                                                style = "display: inline-block; padding: 4px 10px; margin-left: 6px; background-color: #e8f0fe; color: #1a73e8; border-radius: 12px; font-size: 12px; font-weight: 500;"
+                                                attributes["title"] = "This release is shared, so edits to it apply to every film on it"
+                                                +"Shared with ${media.sharedWithCount} ${if (media.sharedWithCount == 1) "film" else "films"}"
+                                            }
+                                        }
                                         if (!media.alternateTitle.isNullOrBlank()) {
                                             div {
                                                 style = "margin-top: 2px; color: #5f6368; font-size: 12px; font-style: italic;"
@@ -753,10 +760,19 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         }
 
         if (media.id != null) {
+            // Removing an entry takes this film off the release. A release shared
+            // with other films survives, which is worth saying out loud.
+            val consequence = if (media.sharedWithCount > 0) {
+                val others = "${media.sharedWithCount} other ${if (media.sharedWithCount == 1) "film" else "films"}"
+                "\n\nThe release itself stays in your collection for the $others on it."
+            } else {
+                "\n\nThis action cannot be undone."
+            }
+
             confirmDialog.show(
-                title = "Delete Physical Media",
-                message = "Are you sure you want to delete $entryLabel?\n\nThis action cannot be undone.",
-                confirmText = "Delete",
+                title = "Remove Physical Media",
+                message = "Take this movie off $entryLabel?$consequence",
+                confirmText = "Remove",
                 cancelText = "Cancel",
                 onConfirm = {
                     deletePhysicalMediaEntry(media.id)
