@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "org.btmonier"
-version = "0.5.2"
+version = "0.6.0"
 
 repositories {
     mavenCentral()
@@ -247,6 +247,25 @@ tasks.register<JavaExec>("migrateCategories") {
     })
 
     // Usage: ./gradlew migrateCategories
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
+// Custom task for folding per-movie physical media rows into shared releases
+tasks.register<JavaExec>("migrateReleases") {
+    group = "application"
+    description = "Fold the per-movie physical media rows into shared releases"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.database.ReleaseMigrationKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Pass command line arguments
     if (project.hasProperty("args")) {
         args(project.property("args").toString().split(" "))
     }
