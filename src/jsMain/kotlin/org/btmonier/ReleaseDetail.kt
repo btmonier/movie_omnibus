@@ -491,8 +491,14 @@ class ReleaseDetail(
             container = container,
             excludedMovieIds = films.map { it.movieId }.toSet(),
             onPick = { movie ->
+                val movieId = movie.id ?: return@MoviePicker
                 try {
-                    linkMovieToRelease(releaseId, movie.id ?: return@MoviePicker, alternateTitle = null)
+                    linkMovieToRelease(
+                        releaseId = releaseId,
+                        movieId = movieId,
+                        entryLetter = nextEntryLetterFor(movieId),
+                        alternateTitle = null
+                    )
                     release = fetchRelease(releaseId)
                     render()
                     loadFilms()
@@ -501,5 +507,18 @@ class ReleaseDetail(
                 }
             }
         ).show()
+    }
+
+    /**
+     * The letter to stamp on a film joining this release: the first one free
+     * among the copies that film already has, the same suggestion the Add
+     * Physical Media form makes. If the lookup fails the film is still added,
+     * just without a letter.
+     */
+    private suspend fun nextEntryLetterFor(movieId: Int): String? = try {
+        nextEntryLetter(fetchPhysicalMediaForMovie(movieId))
+    } catch (e: Exception) {
+        console.error("Could not determine an entry letter for movie $movieId:", e)
+        null
     }
 }

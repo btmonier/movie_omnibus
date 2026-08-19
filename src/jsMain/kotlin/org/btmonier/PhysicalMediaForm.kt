@@ -221,51 +221,12 @@ class PhysicalMediaForm(
             }
         }
 
-        // Entry Letter
+        // Which disc this is and where it sits on the shelf. Like the fields
+        // below the divider, these belong to the release and are therefore
+        // shared with every film on it, so they are hidden entirely while linked
+        // to an existing release - those values come from the release picked.
         div {
-            style = "margin-bottom: 16px;"
-            label {
-                htmlFor = "form-entry-letter"
-                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
-                +"Entry Letter"
-            }
-            input(type = InputType.text) {
-                id = "form-entry-letter"
-                value = media?.entryLetter?.takeIf { it.isNotBlank() } ?: suggestedEntryLetter ?: ""
-                placeholder = "A-Z"
-                maxLength = "1"
-                style = """
-                    width: 100%;
-                    padding: 10px 12px;
-                    font-size: 14px;
-                    border: 1px solid #dadce0;
-                    border-radius: 4px;
-                    box-sizing: border-box;
-                    font-family: 'Roboto', arial, sans-serif;
-                    text-transform: uppercase;
-                """.trimIndent()
-                attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
-                attributes["onblur"] = "this.style.borderColor='#dadce0'"
-                attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
-            }
-        }
-
-        // Alternate title, for releases that list this film under a different name.
-        // Sits with the entry letter because both describe this film's place on the
-        // release rather than the release itself.
-        inputField(
-            "Alternate Title on This Release",
-            "physical-media-form-alternate-title",
-            media?.alternateTitle ?: "",
-            "e.g., Spirits of Bruce Lee",
-            required = false
-        )
-
-        // Everything below belongs to the release and is therefore shared with
-        // every film on it. Hidden entirely while linked to an existing release,
-        // since those values come from the release that was picked.
-        div {
-        id = "shared-release-fields"
+        id = "shared-release-identity-fields"
         if (linked) {
             style = "display: none;"
         }
@@ -393,6 +354,58 @@ class PhysicalMediaForm(
                 style = "margin-top: 4px; margin-left: 24px; font-size: 12px; color: #5f6368;"
                 +"This unit contains 2 or more films (e.g., a box set)"
             }
+        }
+
+        } // end shared-release-identity-fields
+
+        // Alternate title, for releases that list this film under a different name.
+        inputField(
+            "Alternate Title on This Release",
+            "physical-media-form-alternate-title",
+            media?.alternateTitle ?: "",
+            "e.g., Spirits of Bruce Lee",
+            required = false
+        )
+
+        hr {
+            style = "border: none; border-top: 1px solid #e8eaed; margin: 24px 0;"
+        }
+
+        // Entry Letter
+        div {
+            style = "margin-bottom: 16px;"
+            label {
+                htmlFor = "form-entry-letter"
+                style = "display: block; margin-bottom: 6px; font-weight: 500; font-size: 14px; color: #5f6368;"
+                +"Entry Letter"
+            }
+            input(type = InputType.text) {
+                id = "form-entry-letter"
+                value = media?.entryLetter?.takeIf { it.isNotBlank() } ?: suggestedEntryLetter ?: ""
+                placeholder = "A-Z"
+                maxLength = "1"
+                style = """
+                    width: 100%;
+                    padding: 10px 12px;
+                    font-size: 14px;
+                    border: 1px solid #dadce0;
+                    border-radius: 4px;
+                    box-sizing: border-box;
+                    font-family: 'Roboto', arial, sans-serif;
+                    text-transform: uppercase;
+                """.trimIndent()
+                attributes["onfocus"] = "this.style.borderColor='#1a73e8'"
+                attributes["onblur"] = "this.style.borderColor='#dadce0'"
+                attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
+            }
+        }
+
+        // The rest of the release: what it is called, what is on it, and who put
+        // it out. Shared with every film on the release, so hidden while linked.
+        div {
+        id = "shared-release-fields"
+        if (linked) {
+            style = "display: none;"
         }
 
         // Title
@@ -553,8 +566,10 @@ class PhysicalMediaForm(
      * inputs would only invite edits that are silently ignored.
      */
     private fun applyLinkedRelease(release: ReleaseSummary?) {
-        val shared = document.getElementById("shared-release-fields") as? HTMLElement ?: return
-        shared.style.display = if (release == null) "block" else "none"
+        val display = if (release == null) "block" else "none"
+        listOf("shared-release-identity-fields", "shared-release-fields").forEach { id ->
+            (document.getElementById(id) as? HTMLElement)?.style?.display = display
+        }
     }
 
     /**
