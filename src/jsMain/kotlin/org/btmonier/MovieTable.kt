@@ -346,6 +346,9 @@ class MovieTable(private val container: Element) {
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 24px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
 
+                // Physical media collection progress
+                physicalMediaProgressMeter()
+
                 // Filters container (will be populated after loading options)
                 div {
                     id = "filters-container"
@@ -1496,6 +1499,10 @@ class MovieTable(private val container: Element) {
         } finally {
             isLoading = false
         }
+
+        // Keep the collection meter in sync with adds, edits and deletes,
+        // all of which reload the movie list.
+        loadPhysicalMediaProgress()
     }
 
     private fun showLoadingState() {

@@ -297,6 +297,15 @@ fun Route.movieRoutes(dao: MovieDao) {
             call.respond(HttpStatusCode.OK, mapOf("count" to count))
         }
 
+        // GET /api/movies/stats/physical-media - Collection physical-media coverage
+        get("/stats/physical-media") {
+            val (total, withMedia) = dao.getPhysicalMediaCoverage()
+            call.respond(HttpStatusCode.OK, mapOf(
+                "totalMovies" to total,
+                "moviesWithPhysicalMedia" to withMedia
+            ))
+        }
+
         // POST /api/movies - Create a new movie
         post {
             try {

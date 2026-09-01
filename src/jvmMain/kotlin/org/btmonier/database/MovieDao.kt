@@ -571,6 +571,16 @@ class MovieDao(gcsService: GcsService? = null) {
     }
 
     /**
+     * Total movies and how many of them have at least one physical release link.
+     * @return Pair of (totalMovies, moviesWithPhysicalMedia)
+     */
+    suspend fun getPhysicalMediaCoverage(): Pair<Int, Int> = DatabaseFactory.dbQuery {
+        val total = Movies.selectAll().count().toInt()
+        val withMedia = ReleaseMovies.select(ReleaseMovies.movieId).withDistinct().count().toInt()
+        total to withMedia
+    }
+
+    /**
      * Count unwatched movies with optional filters (for UI display).
      * Supports multiple values per filter with OR logic.
      */

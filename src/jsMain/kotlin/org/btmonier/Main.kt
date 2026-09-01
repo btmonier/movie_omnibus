@@ -869,4 +869,22 @@ suspend fun fetchUnwatchedMovieCount(
     return result.count
 }
 
+@kotlinx.serialization.Serializable
+data class PhysicalMediaCoverageResponse(
+    val totalMovies: Int,
+    val moviesWithPhysicalMedia: Int
+)
+
+/**
+ * Get how many movies in the whole collection have at least one physical media entry.
+ */
+suspend fun fetchPhysicalMediaCoverage(): PhysicalMediaCoverageResponse {
+    val response = window.fetch("$API_BASE_URL/movies/stats/physical-media").await()
+    if (!response.ok) {
+        throw Exception("Failed to fetch physical media coverage: ${response.status} ${response.statusText}")
+    }
+    val json = response.text().await()
+    return Json.decodeFromString(json)
+}
+
 private fun encodeURIComponent(s: String): String = js("encodeURIComponent(s)") as String
