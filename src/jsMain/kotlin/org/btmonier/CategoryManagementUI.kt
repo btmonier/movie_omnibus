@@ -26,7 +26,8 @@ private enum class CategoryKind(
     COLLECTIONS("collections", "Collections", "Collection", "mdi-bookmark-multiple", hasDescription = true),
     DISTRIBUTORS("distributors", "Distributors", "Distributor", "mdi-factory"),
     THEMES("themes", "Themes", "Theme", "mdi-lightbulb-outline"),
-    COUNTRIES("countries", "Countries", "Country", "mdi-earth")
+    COUNTRIES("countries", "Countries", "Country", "mdi-earth"),
+    WISHLIST_TAGS("wishlist-tags", "Wishlist Tags", "Wishlist tag", "mdi-heart-outline")
 }
 
 /**
@@ -407,9 +408,8 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
                 div {
                     style = "font-size: 13px; color: #5f6368; margin-top: 4px;"
                     +when (entry.usageCount) {
-                        0 -> "Not used by any movie"
-                        1 -> "Used by 1 movie"
-                        else -> "Used by ${entry.usageCount} movies"
+                        0 -> "Not used by any ${usageNoun()}"
+                        else -> "Used by ${movieCountLabel(entry.usageCount)}"
                     }
                 }
 
@@ -646,7 +646,7 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
 
     private fun handleDelete(entry: CategoryEntryResponse) {
         val consequence = when {
-            entry.usageCount == 0 -> "It is not used by any movie."
+            entry.usageCount == 0 -> "It is not used by any ${usageNoun()}."
             activeKind == CategoryKind.DISTRIBUTORS ->
                 "The ${movieCountLabel(entry.usageCount)} using it will keep their physical media entries, but without a distributor."
             else -> "It will be removed from the ${movieCountLabel(entry.usageCount)} using it."
@@ -696,7 +696,15 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
     private fun comparisonKey(name: String): String =
         name.lowercase().filter { it.isLetterOrDigit() }
 
-    private fun movieCountLabel(count: Int): String = if (count == 1) "1 movie" else "$count movies"
+    /** What a usage count counts: releases for distributors, wishlist items for tags, movies otherwise. */
+    private fun usageNoun(): String = when (activeKind) {
+        CategoryKind.DISTRIBUTORS -> "release"
+        CategoryKind.WISHLIST_TAGS -> "wishlist item"
+        else -> "movie"
+    }
+
+    private fun movieCountLabel(count: Int): String =
+        if (count == 1) "1 ${usageNoun()}" else "$count ${usageNoun()}s"
 
     private fun textInputStyle() = """
         width: 100%;

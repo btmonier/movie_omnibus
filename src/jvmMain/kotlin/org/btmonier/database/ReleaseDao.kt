@@ -72,6 +72,7 @@ data class ReleaseFilters(
  */
 class ReleaseDao(private val gcsService: GcsService? = null) {
     private val categoryDao = CategoryDao()
+    private val purchaseDao = PurchaseDao()
 
     /**
      * A page of releases, ordered as requested, together with the total number
@@ -191,10 +192,14 @@ class ReleaseDao(private val gcsService: GcsService? = null) {
      * offer linking instead of creating a second copy of the same release.
      */
     suspend fun findByBluRayUrl(url: String): ReleaseSummary? = DatabaseFactory.dbQuery {
-        val key = bluRayKey(url) ?: return@dbQuery null
+        findByBluRayUrlInTransaction(url)
+    }
+
+    internal fun findByBluRayUrlInTransaction(url: String): ReleaseSummary? {
+        val key = bluRayKey(url) ?: return null
         val filmCounts = filmCountsByRelease()
 
-        Releases.selectAll()
+        return Releases.selectAll()
             .where { Releases.blurayComUrl.isNotNull() }
             .firstOrNull { bluRayKey(it[Releases.blurayComUrl]) == key }
             ?.let { row ->
@@ -215,6 +220,9 @@ class ReleaseDao(private val gcsService: GcsService? = null) {
             }
     }
 
+    internal fun releaseExistsInTransaction(id: Int): Boolean =
+        Releases.selectAll().where { Releases.id eq id }.any()
+
     /**
      * Create a release. Any films listed on [release] are linked to it.
      */
@@ -234,6 +242,9 @@ class ReleaseDao(private val gcsService: GcsService? = null) {
      * Delete a release along with its film links, media types and images.
      */
     suspend fun deleteRelease(id: Int): Boolean = DatabaseFactory.dbQuery {
+        // Wishlist items that became this release keep their history, minus the link
+        WishlistItems.update({ WishlistItems.releaseId eq id }) { it[releaseId] = null }
+        purchaseDao.detachFromReleaseInTransaction(id)
         ReleaseMovies.deleteWhere(op = { ReleaseMovies.releaseId.eq(id) })
         ReleaseMediaTypes.deleteWhere(op = { ReleaseMediaTypes.releaseId.eq(id) })
         ReleaseImages.deleteWhere(op = { ReleaseImages.releaseId.eq(id) })
@@ -372,7 +383,8 @@ class ReleaseDao(private val gcsService: GcsService? = null) {
             films = if (includeFilms) filmsFor(id) else emptyList(),
             filmCount = filmCountFor(id),
             id = id,
-            createdAt = row[Releases.createdAt].toString()
+            createdAt = row[Releases.createdAt].toString(),
+            purchase = purchaseDao.getForReleaseInTransaction(id)
         )
     }
 

@@ -33,11 +33,13 @@ class ReleaseDetail(
     private val alertDialog = AlertDialog(container)
     private val confirmDialog = ConfirmDialog(container)
     private val metadataModal = MovieMetadataModal(container) {}
+    private var defaultTaxRate: Double = DEFAULT_TAX_RATE
 
     fun show() {
         mainScope.launch {
             try {
                 release = fetchRelease(releaseId)
+                defaultTaxRate = runCatching { fetchSettings().defaultTaxRate }.getOrDefault(DEFAULT_TAX_RATE)
             } catch (e: Exception) {
                 alertDialog.show(title = "Error", message = "Failed to load release: ${e.message}")
                 onBack()
@@ -127,6 +129,8 @@ class ReleaseDetail(
                 style = "max-width: 1100px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
 
                 releaseHeader(current)
+
+                purchasePanel(current)
 
                 div {
                     style = "margin-top: 36px;"
@@ -289,6 +293,128 @@ class ReleaseDetail(
                 }
             }
         }
+    }
+
+    /**
+     * What was paid for this release, with Add / Edit / Remove. Releases that
+     * arrived through the wishlist already have this filled in.
+     */
+    private fun FlowContent.purchasePanel(current: Release) {
+        val purchase = current.purchase
+        div {
+            style = """
+                margin-top: 20px;
+                background-color: white;
+                border: 1px solid #e8eaed;
+                border-radius: 12px;
+                padding: 18px 24px;
+            """.trimIndent()
+
+            div {
+                style = "display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;"
+                h2 {
+                    style = "font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 20px; color: #202124; margin: 0; letter-spacing: 0.5px; display: flex; align-items: center; gap: 10px;"
+                    span { classes = setOf("mdi", "mdi-receipt-text-outline"); style = "color: #1a73e8; font-size: 22px;" }
+                    +"Purchase"
+                    if (purchase != null) {
+                        span { style = "font-size: 20px; font-weight: 600; color: #202124; margin-left: 8px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"; +formatMoney(purchase.total) }
+                    }
+                }
+                div {
+                    style = "display: flex; gap: 8px;"
+                    if (purchase == null) {
+                        button {
+                            style = outlineButtonStyle("#1a73e8")
+                            span { classes = setOf("mdi", "mdi-plus"); style = "font-size: 16px;" }
+                            +"Record what you paid"
+                            onClickFunction = { openPurchaseDialog(null) }
+                        }
+                    } else {
+                        button {
+                            style = outlineButtonStyle()
+                            span { classes = setOf("mdi", "mdi-pencil-outline"); style = "font-size: 16px;" }
+                            +"Edit"
+                            onClickFunction = { openPurchaseDialog(purchase) }
+                        }
+                        button {
+                            style = outlineButtonStyle("#d93025")
+                            span { classes = setOf("mdi", "mdi-delete-outline"); style = "font-size: 16px;" }
+                            +"Remove"
+                            onClickFunction = { confirmRemovePurchase() }
+                        }
+                    }
+                }
+            }
+
+            if (purchase == null) {
+                p {
+                    style = "margin: 10px 0 0 0; font-size: 14px; color: #5f6368;"
+                    +"No purchase recorded. Add the subtotal, tax and shipping to include this release in your spending totals."
+                }
+            } else {
+                div {
+                    style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px 20px; margin-top: 14px; font-size: 14px; color: #3c4043;"
+                    purchase.vendor?.let { purchaseDetail("Vendor", it) }
+                    purchase.orderDate?.let { purchaseDetail("Ordered", formatDate(it)) }
+                    purchaseDetail("Subtotal", formatMoney(purchase.subtotal))
+                    purchaseDetail("Tax (${formatPercent(purchase.taxRate ?: DEFAULT_TAX_RATE)})", formatMoney(purchase.taxAmount ?: 0.0))
+                    purchaseDetail("Shipping", formatMoney(purchase.shipping))
+                    purchase.orderNumber?.let { purchaseDetail("Order #", it) }
+                    purchase.shippedDate?.let { purchaseDetail("Shipped", formatDate(it)) }
+                    purchase.receivedDate?.let { purchaseDetail("Received", formatDate(it)) }
+                }
+                purchase.notes?.takeIf { it.isNotBlank() }?.let {
+                    div { style = "margin-top: 12px; font-size: 13px; color: #5f6368; white-space: pre-wrap;"; +it }
+                }
+                purchase.trackingUrl?.let {
+                    a(href = it, target = "_blank") {
+                        style = "display: inline-flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 13px; color: #1a73e8; text-decoration: none;"
+                        span { classes = setOf("mdi", "mdi-truck-outline"); style = "font-size: 16px;" }
+                        +"Track shipment"
+                    }
+                }
+            }
+        }
+    }
+
+    private fun FlowContent.purchaseDetail(label: String, value: String) {
+        div {
+            div { style = "font-size: 12px; color: #80868b;"; +label }
+            div { style = "font-weight: 500;"; +value }
+        }
+    }
+
+    private fun openPurchaseDialog(existing: Purchase?) {
+        PurchaseDialog(
+            container,
+            existing = existing,
+            defaultTaxRate = defaultTaxRate,
+            subtitle = release?.title?.let { "What you paid for \"$it\", tax included." }
+        ) { purchase ->
+            saveReleasePurchase(releaseId, purchase)
+            release = fetchRelease(releaseId)
+            render()
+            loadFilms()
+        }.show()
+    }
+
+    private fun confirmRemovePurchase() {
+        confirmDialog.show(
+            title = "Remove purchase",
+            message = "Forget what you paid for this release? The release and its films are not affected.",
+            confirmText = "Remove",
+            onConfirm = {
+                mainScope.launch {
+                    if (deleteReleasePurchase(releaseId)) {
+                        release = fetchRelease(releaseId)
+                        render()
+                        loadFilms()
+                    } else {
+                        alertDialog.show(title = "Error", message = "Failed to remove the purchase.")
+                    }
+                }
+            }
+        )
     }
 
     private fun FlowContent.detailRow(label: String, value: String?) {

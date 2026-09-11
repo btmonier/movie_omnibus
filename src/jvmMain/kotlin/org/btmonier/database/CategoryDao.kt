@@ -16,7 +16,8 @@ enum class CategoryType(val slug: String, val label: String) {
     COLLECTION("collections", "Collections"),
     DISTRIBUTOR("distributors", "Distributors"),
     THEME("themes", "Themes"),
-    COUNTRY("countries", "Countries");
+    COUNTRY("countries", "Countries"),
+    WISHLIST_TAG("wishlist-tags", "Wishlist Tags");
 
     companion object {
         fun fromSlug(slug: String): CategoryType? =
@@ -104,6 +105,11 @@ class CategoryDao {
         CategoryType.COUNTRY to Spec(
             Countries, Countries.name, null,
             "movie_countries", "country_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+        ),
+        // Counted per wishlist item rather than per movie.
+        CategoryType.WISHLIST_TAG to Spec(
+            WishlistTags, WishlistTags.name, null,
+            "wishlist_item_tags", "tag_id", "item_id", usageIsOptional = false, usageIsUnique = true
         )
     )
 

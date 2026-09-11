@@ -289,4 +289,92 @@ class BluRayComUtilsTest {
         assertTrue(media.mediaTypes.contains(MediaType.FOURK), "Should detect 4K")
         assertTrue(media.mediaTypes.contains(MediaType.BLURAY), "Combo should also detect Blu-ray")
     }
+
+    @Test
+    fun `parseMoney reads dollar amounts with thousands separators`() {
+        assertEquals(31.32, BluRayComUtils.parseMoney("$31.32 (Save 37%)"))
+        assertEquals(1299.99, BluRayComUtils.parseMoney("$1,299.99"))
+        assertEquals(25.0, BluRayComUtils.parseMoney("$ 25"))
+        assertEquals(null, BluRayComUtils.parseMoney("no price here"))
+        assertEquals(null, BluRayComUtils.parseMoney(null))
+    }
+
+    @Test
+    fun `extractPrices reads the Price block`() {
+        val html = """
+            <html><body><td>
+            <span class="subheading">Price</span><br>
+            List price: <strike>${'$'}49.95</strike><br>
+            Amazon: <a href="#" title="Last price change: Jun 01, 2026"><b>${'$'}31.32</b> (Save 37%)</a>
+            <br>New from: <a href="#"><b>${'$'}29.99</b> (Save 40%)</a><br>
+            <font color="#006600">In Stock</font><br>
+            <a id="movie_buylink" href="https://www.blu-ray.com/link/click.php?p=1&tid=022&c=7">buy</a>
+            </td></body></html>
+        """.trimIndent()
+        val prices = BluRayComUtils.extractPrices(Jsoup.parse(html))
+
+        assertEquals(49.95, prices.listPrice)
+        assertEquals(31.32, prices.amazonPrice)
+        assertEquals(29.99, prices.newFromPrice)
+        assertEquals(true, prices.inStock)
+        assertEquals("2026-06-01", prices.lastPriceChange)
+        assertEquals("https://www.blu-ray.com/link/click.php?p=1&tid=022&c=7", prices.buyLink)
+        assertFalse(prices.isEmpty)
+    }
+
+    @Test
+    fun `extractPrices from real example HTML`() {
+        val htmlContent = this::class.java.getResource("/bluray_invaders.html")?.readText()
+            ?: error("Could not load bluray_invaders.html")
+        val prices = BluRayComUtils.extractPrices(Jsoup.parse(htmlContent))
+
+        assertEquals(49.95, prices.listPrice)
+        assertEquals(31.32, prices.amazonPrice)
+        assertEquals(31.32, prices.newFromPrice)
+        assertEquals(true, prices.inStock)
+        assertEquals("2026-06-01", prices.lastPriceChange)
+        assertTrue(prices.buyLink?.contains("click.php") == true, "Should capture the buy link")
+    }
+
+    @Test
+    fun `extractPrices tolerates a relative last-change date`() {
+        val htmlContent = this::class.java.getResource("/bluray_burbs.html")?.readText()
+            ?: error("Could not load bluray_burbs.html")
+        val prices = BluRayComUtils.extractPrices(Jsoup.parse(htmlContent))
+
+        assertEquals(44.98, prices.listPrice)
+        assertEquals(31.54, prices.amazonPrice)
+        assertEquals(31.54, prices.newFromPrice)
+        assertEquals(true, prices.inStock)
+        assertEquals(null, prices.lastPriceChange, "\"2 days ago\" is not a date")
+    }
+
+    @Test
+    fun `extractPrices reads third-party prices when Amazon has none`() {
+        val htmlContent = this::class.java.getResource("/bluray_dvd_ichi.html")?.readText()
+            ?: error("Could not load bluray_dvd_ichi.html")
+        val prices = BluRayComUtils.extractPrices(Jsoup.parse(htmlContent))
+
+        assertEquals(14.99, prices.listPrice)
+        assertEquals(null, prices.amazonPrice)
+        assertEquals(20.34, prices.newFromPrice)
+        assertEquals(9.98, prices.usedFromPrice)
+        assertEquals(null, prices.inStock)
+    }
+
+    @Test
+    fun `extractPrices is empty when the page has no Price block`() {
+        val html = """
+            <html><head><meta property="og:title" content="Some Film Blu-ray" /></head>
+            <body><span class="subheading">Discs</span><br>Blu-ray Disc<br></body></html>
+        """.trimIndent()
+        val prices = BluRayComUtils.extractPrices(Jsoup.parse(html))
+
+        assertEquals(null, prices.listPrice)
+        assertEquals(null, prices.amazonPrice)
+        assertEquals(null, prices.newFromPrice)
+        assertEquals(null, prices.usedFromPrice)
+        assertEquals(null, prices.inStock)
+        assertTrue(prices.isEmpty)
+    }
 }

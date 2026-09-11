@@ -101,7 +101,15 @@ object DatabaseFactory {
                 ReleaseMovies,
                 ReleaseMediaTypes,
                 ReleaseImages,
-                WatchedEntries
+                WatchedEntries,
+                WishlistItems,
+                WishlistItemMediaTypes,
+                WishlistItemImages,
+                WishlistItemMovies,
+                WishlistPriceHistory,
+                WishlistTags,
+                WishlistItemTags,
+                Purchases
             )
         }
 

@@ -773,6 +773,7 @@ data class PhysicalMediaScrapeResponse(
     // Set when this URL is already recorded, so the form can offer to link that
     // release instead of entering it a second time.
     val existingRelease: ReleaseSummary? = null,
+    val prices: BluRayPrices? = null,
     val error: String? = null
 )
 
@@ -885,6 +886,230 @@ suspend fun fetchPhysicalMediaCoverage(): PhysicalMediaCoverageResponse {
     }
     val json = response.text().await()
     return Json.decodeFromString(json)
+}
+
+// ==================== Wishlist API ====================
+
+@kotlinx.serialization.Serializable
+data class WishlistListResponse(
+    val items: List<WishlistItem>,
+    val totalCount: Int,
+    val mediaTypes: List<String> = emptyList(),
+    val distributors: List<String> = emptyList(),
+    val tags: List<String> = emptyList()
+)
+
+@kotlinx.serialization.Serializable
+data class WishlistImportResponse(
+    val success: Boolean,
+    val item: WishlistItem? = null,
+    val existingItem: WishlistItem? = null,
+    val existingRelease: ReleaseSummary? = null,
+    val prices: BluRayPrices? = null,
+    val error: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class WishlistMoviesRequest(val movieIds: List<Int>)
+
+@kotlinx.serialization.Serializable
+data class PriceRefreshResponse(
+    val success: Boolean,
+    val item: WishlistItem? = null,
+    val prices: BluRayPrices? = null,
+    val observationsAdded: Int = 0,
+    val error: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class BulkPriceRefreshResponse(
+    val checked: Int,
+    val failed: Int,
+    val priceChanges: Int,
+    val skipped: Int = 0,
+    val errors: List<String> = emptyList()
+)
+
+@kotlinx.serialization.Serializable
+data class SettingsResponse(
+    val defaultTaxRate: Double,
+    val wishlistPriceRefreshHours: Double = 0.0
+)
+
+private val jsonHeaders: dynamic get() = js("({'Content-Type': 'application/json'})")
+
+private suspend fun Response.errorMessage(): String {
+    val body = runCatching { text().await() }.getOrNull()
+    val fromBody = body?.let { runCatching { Json.parseToJsonElement(it).jsonObject["error"]?.jsonPrimitive?.contentOrNull }.getOrNull() }
+    return fromBody ?: "$status $statusText"
+}
+
+/**
+ * Client settings, such as the default sales tax rate for the purchase form.
+ */
+suspend fun fetchSettings(): SettingsResponse {
+    val response = window.fetch("$API_BASE_URL/settings").await()
+    if (!response.ok) throw Exception("Failed to fetch settings: ${response.errorMessage()}")
+    return Json.decodeFromString(SettingsResponse.serializer(), response.text().await())
+}
+
+/**
+ * Every wishlist item matching the filters, plus the values in use for the
+ * filter dropdowns.
+ */
+suspend fun fetchWishlist(
+    search: String? = null,
+    status: WishlistStatus? = null,
+    mediaType: String? = null,
+    distributor: String? = null,
+    tag: String? = null,
+    priority: WishlistPriority? = null,
+    atTarget: Boolean = false,
+    inStock: Boolean = false,
+    sortField: String = "date_added",
+    sortDirection: String = "desc"
+): WishlistListResponse {
+    val params = mutableListOf("sortField=$sortField", "sortDirection=$sortDirection")
+    search?.takeIf { it.isNotBlank() }?.let { params.add("search=${encodeURIComponent(it)}") }
+    status?.let { params.add("status=${it.name}") }
+    mediaType?.takeIf { it.isNotBlank() }?.let { params.add("mediaType=${encodeURIComponent(it)}") }
+    distributor?.takeIf { it.isNotBlank() }?.let { params.add("distributor=${encodeURIComponent(it)}") }
+    tag?.takeIf { it.isNotBlank() }?.let { params.add("tag=${encodeURIComponent(it)}") }
+    priority?.let { params.add("priority=${it.name}") }
+    if (atTarget) params.add("atTarget=true")
+    if (inStock) params.add("inStock=true")
+
+    val response = window.fetch("$API_BASE_URL/wishlist?" + params.joinToString("&")).await()
+    if (!response.ok) throw Exception("Failed to fetch wishlist: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistListResponse.serializer(), response.text().await())
+}
+
+suspend fun fetchWishlistSummary(): WishlistSummary {
+    val response = window.fetch("$API_BASE_URL/wishlist/summary").await()
+    if (!response.ok) throw Exception("Failed to fetch wishlist summary: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistSummary.serializer(), response.text().await())
+}
+
+suspend fun fetchWishlistItem(id: Int): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id").await()
+    if (!response.ok) throw Exception("Failed to fetch wishlist item: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+/**
+ * Wishlist a blu-ray.com release. The response reports an existing wishlist
+ * item or owned release instead of creating a duplicate.
+ */
+suspend fun importWishlistItem(request: WishlistImportRequest): WishlistImportResponse {
+    val response = window.fetch("$API_BASE_URL/wishlist/import", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistImportRequest.serializer(), request)
+    )).await()
+    return Json.decodeFromString(WishlistImportResponse.serializer(), response.text().await())
+}
+
+suspend fun createWishlistItem(item: WishlistItem): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistItem.serializer(), item)
+    )).await()
+    if (!response.ok) throw Exception("Failed to create wishlist item: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+suspend fun updateWishlistItem(id: Int, item: WishlistItem): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id", RequestInit(
+        method = "PUT",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistItem.serializer(), item)
+    )).await()
+    if (!response.ok) throw Exception("Failed to update wishlist item: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+suspend fun deleteWishlistItem(id: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id", RequestInit(method = "DELETE")).await()
+    return response.ok
+}
+
+suspend fun setWishlistItemMovies(id: Int, movieIds: List<Int>): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/movies", RequestInit(
+        method = "PUT",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistMoviesRequest.serializer(), WishlistMoviesRequest(movieIds))
+    )).await()
+    if (!response.ok) throw Exception("Failed to update films: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+/**
+ * Move an item to a new status. Reaching OWNED creates or joins a release.
+ */
+suspend fun transitionWishlistItem(id: Int, request: WishlistTransitionRequest): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/status", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistTransitionRequest.serializer(), request)
+    )).await()
+    if (!response.ok) throw Exception("Failed to update status: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+suspend fun addWishlistPriceObservation(id: Int, observation: PriceObservation): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/prices", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(PriceObservation.serializer(), observation)
+    )).await()
+    if (!response.ok) throw Exception("Failed to log price: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+suspend fun deleteWishlistPriceObservation(id: Int, observationId: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/prices/$observationId", RequestInit(method = "DELETE")).await()
+    return response.ok
+}
+
+suspend fun refreshWishlistItemPrice(id: Int): PriceRefreshResponse {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/refresh-price", RequestInit(method = "POST")).await()
+    return Json.decodeFromString(PriceRefreshResponse.serializer(), response.text().await())
+}
+
+/**
+ * Re-scrape every wanted or ordered item. Items checked in the last hour are
+ * skipped unless [force] is set.
+ */
+suspend fun refreshAllWishlistPrices(force: Boolean = false): BulkPriceRefreshResponse {
+    val url = "$API_BASE_URL/wishlist/refresh-prices" + if (force) "?force=true" else ""
+    val response = window.fetch(url, RequestInit(method = "POST")).await()
+    if (!response.ok) throw Exception("Failed to refresh prices: ${response.errorMessage()}")
+    return Json.decodeFromString(BulkPriceRefreshResponse.serializer(), response.text().await())
+}
+
+// ==================== Purchase API ====================
+
+suspend fun fetchReleasePurchase(releaseId: Int): Purchase? {
+    val response = window.fetch("$API_BASE_URL/releases/$releaseId/purchase").await()
+    if (response.status.toInt() == 404) return null
+    if (!response.ok) throw Exception("Failed to fetch purchase: ${response.errorMessage()}")
+    return Json.decodeFromString(Purchase.serializer(), response.text().await())
+}
+
+suspend fun saveReleasePurchase(releaseId: Int, purchase: Purchase): Purchase {
+    val response = window.fetch("$API_BASE_URL/releases/$releaseId/purchase", RequestInit(
+        method = "PUT",
+        headers = jsonHeaders,
+        body = Json.encodeToString(Purchase.serializer(), purchase)
+    )).await()
+    if (!response.ok) throw Exception("Failed to save purchase: ${response.errorMessage()}")
+    return Json.decodeFromString(Purchase.serializer(), response.text().await())
+}
+
+suspend fun deleteReleasePurchase(releaseId: Int): Boolean {
+    val response = window.fetch("$API_BASE_URL/releases/$releaseId/purchase", RequestInit(method = "DELETE")).await()
+    return response.ok
 }
 
 private fun encodeURIComponent(s: String): String = js("encodeURIComponent(s)") as String

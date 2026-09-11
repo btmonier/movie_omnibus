@@ -224,6 +224,63 @@ object BluRayComUtils {
         }
     }
 
+    private val MONEY = Regex("""\$\s*([\d,]+(?:\.\d{1,2})?)""")
+
+    /**
+     * Parses the first dollar amount in [text] ("$1,299.99" -> 1299.99), or null.
+     */
+    fun parseMoney(text: String?): Double? {
+        if (text.isNullOrBlank()) return null
+        val match = MONEY.find(text) ?: return null
+        return match.groupValues[1].replace(",", "").toDoubleOrNull()
+    }
+
+    /**
+     * Extracts the "Price" block of a release page. blu-ray.com renders it as
+     *
+     * ```
+     * <span class="subheading">Price</span><br>
+     * List price: <strike>$49.95</strike><br>
+     * Amazon: <a title="Last price change: Jun 01, 2026"><b>$31.32</b> (Save 37%)</a>
+     * <br>New from: <a><b>$31.32</b></a><br>
+     * <font color="#006600">In Stock</font>
+     * ```
+     *
+     * Out-of-print releases have no Price block at all, in which case every
+     * field is null rather than the call failing.
+     */
+    fun extractPrices(doc: Document): BluRayPrices {
+        val text = sectionText(doc, "Price")
+
+        fun labelled(label: String): Double? {
+            val match = Regex("""$label:\s*(\$\s*[\d,]+(?:\.\d{1,2})?)""", RegexOption.IGNORE_CASE).find(text)
+            return parseMoney(match?.groupValues?.get(1))
+        }
+
+        val inStock = when {
+            text.isBlank() -> null
+            Regex("""\bIn Stock\b""", RegexOption.IGNORE_CASE).containsMatchIn(text) -> true
+            Regex("""Out of Stock|Currently unavailable|Not available""", RegexOption.IGNORE_CASE).containsMatchIn(text) -> false
+            else -> null
+        }
+
+        val lastChange = doc.select("a[title^=Last price change]").firstOrNull()
+            ?.attr("title")
+            ?.let { parseHumanDate(it) }
+
+        val buyLink = doc.select("a#movie_buylink").attr("href").trim().takeIf { it.isNotBlank() }
+
+        return BluRayPrices(
+            listPrice = labelled("List price"),
+            amazonPrice = labelled("Amazon"),
+            newFromPrice = labelled("New from"),
+            usedFromPrice = labelled("Used from"),
+            inStock = inStock,
+            lastPriceChange = lastChange,
+            buyLink = buyLink
+        )
+    }
+
     /**
      * Aggregates all scrapable fields into a [PhysicalMedia] preview (no database
      * id). The supplied [url] is stored as the blu-ray.com link.

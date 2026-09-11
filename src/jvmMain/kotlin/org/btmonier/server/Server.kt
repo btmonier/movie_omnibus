@@ -18,7 +18,11 @@ import org.btmonier.database.CategoryDao
 import org.btmonier.database.DatabaseFactory
 import org.btmonier.database.MovieDao
 import org.btmonier.database.PhysicalMediaDao
+import org.btmonier.database.PurchaseDao
 import org.btmonier.database.ReleaseDao
+import org.btmonier.database.WishlistDao
+import org.btmonier.WishlistPriceRefresher
+import org.btmonier.WishlistPriceService
 import org.btmonier.storage.GcsService
 import org.slf4j.event.Level
 import java.io.File
@@ -150,6 +154,12 @@ fun Application.configureServer() {
     val physicalMediaDao = PhysicalMediaDao(gcsService)
     val releaseDao = ReleaseDao(gcsService)
     val categoryDao = CategoryDao()
+    val purchaseDao = PurchaseDao()
+    val wishlistDao = WishlistDao(gcsService, releaseDao, purchaseDao)
+    val priceService = WishlistPriceService(wishlistDao)
+
+    // Periodically re-scrape wishlist prices while the server is up
+    WishlistPriceRefresher.start(this, priceService)
 
     // Configure JSON serialization
     install(ContentNegotiation) {
@@ -215,6 +225,8 @@ fun Application.configureServer() {
         genreRoutes(categoryDao)
         collectionRoutes(categoryDao)
         categoryRoutes(categoryDao)
+        wishlistRoutes(wishlistDao, releaseDao, priceService)
+        purchaseRoutes(purchaseDao)
 
         // Health check endpoint
         get("/health") {
@@ -262,7 +274,25 @@ fun Application.configureServer() {
                     "POST /api/categories/{type} - Create a category entry",
                     "PUT /api/categories/{type}/{id} - Rename an entry (?allowMerge=true to merge)",
                     "POST /api/categories/{type}/merge - Merge entries into one",
-                    "DELETE /api/categories/{type}/{id} - Delete a category entry"
+                    "DELETE /api/categories/{type}/{id} - Delete a category entry",
+                    "GET /api/wishlist - List wishlist items (filter and sort via query params)",
+                    "GET /api/wishlist/summary - Counts by status and spend totals",
+                    "POST /api/wishlist/import - Wishlist a blu-ray.com release URL",
+                    "POST /api/wishlist - Create a wishlist item by hand",
+                    "GET /api/wishlist/{id} - Get a wishlist item",
+                    "PUT /api/wishlist/{id} - Update a wishlist item",
+                    "DELETE /api/wishlist/{id} - Delete a wishlist item",
+                    "PUT /api/wishlist/{id}/movies - Set the films the item will link to",
+                    "POST /api/wishlist/{id}/status - Move to wishlist/ordered/shipped/owned (owned creates or joins a release)",
+                    "GET /api/wishlist/{id}/prices - Price history",
+                    "POST /api/wishlist/{id}/prices - Log a price seen elsewhere",
+                    "DELETE /api/wishlist/{id}/prices/{obsId} - Delete a price observation",
+                    "POST /api/wishlist/{id}/refresh-price - Re-scrape blu-ray.com for this item",
+                    "POST /api/wishlist/refresh-prices - Re-scrape every wanted/ordered item",
+                    "GET /api/releases/{id}/purchase - What was paid for a release",
+                    "PUT /api/releases/{id}/purchase - Record or replace what was paid",
+                    "DELETE /api/releases/{id}/purchase - Remove the purchase record",
+                    "GET /api/settings - Client settings (default tax rate)"
                 )
             ))
         }

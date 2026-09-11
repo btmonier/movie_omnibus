@@ -271,6 +271,25 @@ tasks.register<JavaExec>("migrateReleases") {
     }
 }
 
+// Custom task for refreshing wishlist prices from blu-ray.com
+tasks.register<JavaExec>("refreshWishlistPrices") {
+    group = "application"
+    description = "Re-scrape blu-ray.com prices for wishlist items (--all, --force, --limit N, --dry-run)"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.WishlistPriceRefreshKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Pass command line arguments
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
 // Custom task for listing all movies in the database
 tasks.register<JavaExec>("listMovies") {
     group = "application"

@@ -188,6 +188,37 @@ class MovieTable(private val container: Element) {
                             span { +"Releases" }
                         }
 
+                        // Wishlist button
+                        a {
+                            style = """
+                                display: flex;
+                                align-items: center;
+                                gap: 6px;
+                                padding: 10px 16px;
+                                font-size: 14px;
+                                font-weight: 500;
+                                cursor: pointer;
+                                background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
+                                color: white;
+                                border: none;
+                                border-radius: 6px;
+                                text-decoration: none;
+                                transition: transform 0.2s, box-shadow 0.2s;
+                                box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
+                            """.trimIndent()
+                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(233, 30, 99, 0.5)'"
+                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(233, 30, 99, 0.4)'"
+                            onClickFunction = { e ->
+                                e.preventDefault()
+                                showWishlist()
+                            }
+                            span {
+                                classes = setOf("mdi", "mdi-heart-outline")
+                                style = "font-size: 18px;"
+                            }
+                            span { +"Wishlist" }
+                        }
+
                         // Random button
                         a {
                             style = """
@@ -2205,5 +2236,9 @@ class MovieTable(private val container: Element) {
 
     private fun showReleaseBrowser() {
         ReleaseBrowser(container, onBack = { render() }).show()
+    }
+
+    private fun showWishlist() {
+        WishlistPage(container, onBack = { render() }).show()
     }
 }

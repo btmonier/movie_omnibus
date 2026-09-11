@@ -7,6 +7,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import org.btmonier.BluRayComUtils
+import org.btmonier.BluRayPrices
 import org.btmonier.MediaType
 import org.btmonier.PhysicalMedia
 import org.btmonier.ReleaseSummary
@@ -33,6 +34,7 @@ data class PhysicalMediaScrapeResponse(
     val success: Boolean,
     val physicalMedia: PhysicalMedia? = null,
     val existingRelease: ReleaseSummary? = null,
+    val prices: BluRayPrices? = null,
     val error: String? = null
 )
 
@@ -79,7 +81,8 @@ fun Route.physicalMediaRoutes(movieDao: MovieDao, physicalMediaDao: PhysicalMedi
                 call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
                     success = true,
                     physicalMedia = physicalMedia,
-                    existingRelease = releaseDao.findByBluRayUrl(url)
+                    existingRelease = releaseDao.findByBluRayUrl(url),
+                    prices = BluRayComUtils.extractPrices(doc).takeUnless { it.isEmpty }
                 ))
             } catch (e: Exception) {
                 call.respond(HttpStatusCode.OK, PhysicalMediaScrapeResponse(
