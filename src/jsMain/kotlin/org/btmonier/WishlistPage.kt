@@ -5,6 +5,7 @@ import kotlinx.browser.localStorage
 import kotlinx.browser.window
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
@@ -12,6 +13,8 @@ import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
 import kotlinx.html.js.onInputFunction
 import org.w3c.dom.Element
+import org.w3c.dom.HTMLButtonElement
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 
@@ -33,7 +36,14 @@ private enum class GroupBy(val slug: String, val label: String) {
 
 private const val BUDGET_AMOUNT_KEY = "wishlist-budget-amount"
 private const val BUDGET_COUNT_KEY = "wishlist-budget-count"
+private const val BUDGET_ANY_COUNT_KEY = "wishlist-budget-any-count"
+private const val BUDGET_SKIP_PREORDERS_KEY = "wishlist-budget-skip-preorders"
 private const val BUDGET_EXPANDED_KEY = "wishlist-budget-expanded"
+
+/** How often to ask the server how far the refresh pass has got. */
+private const val POLL_INTERVAL_MS = 1000L
+
+private const val SEARCH_INPUT_ID = "wishlist-search-input"
 
 /**
  * The wishlist: physical releases you want, imported from blu-ray.com with
@@ -62,6 +72,8 @@ class WishlistPage(
 
     private var budgetAmount = localStorage.getItem(BUDGET_AMOUNT_KEY)?.toDoubleOrNull() ?: 100.0
     private var budgetCount = localStorage.getItem(BUDGET_COUNT_KEY)?.toIntOrNull() ?: 3
+    private var budgetAnyCount = localStorage.getItem(BUDGET_ANY_COUNT_KEY) == "true"
+    private var budgetSkipPreorders = localStorage.getItem(BUDGET_SKIP_PREORDERS_KEY) == "true"
     private var budgetExpanded = localStorage.getItem(BUDGET_EXPANDED_KEY) != "false"
     private var budgetResult: BudgetPickResult? = null
 
@@ -70,6 +82,7 @@ class WishlistPage(
     private var tagOptions: List<String> = emptyList()
     private var isLoading = false
     private var isRefreshingAll = false
+    private var refreshProgress: RefreshProgressResponse? = null
     private val refreshingIds = mutableSetOf<Int>()
 
     private val alertDialog = AlertDialog(container)
@@ -83,6 +96,8 @@ class WishlistPage(
             // fetched alongside the wishlist rather than ahead of it
             coroutineScope {
                 launch { defaultTaxRate = runCatching { fetchSettings().defaultTaxRate }.getOrDefault(DEFAULT_TAX_RATE) }
+                // The store pickers in the status and price forms render synchronously
+                launch { StoreOptions.ensureLoaded() }
                 launch { loadAll() }
             }
         }
@@ -213,24 +228,119 @@ class WishlistPage(
         )
     }
 
+    /**
+     * Check every price source of every wanted or ordered item. The pass runs
+     * on the server and is watched here, so a refresh spanning dozens of pages
+     * shows how far along it is instead of spinning for minutes.
+     */
     private fun refreshAllPrices() {
         if (isRefreshingAll) return
         isRefreshingAll = true
-        renderResults()
+        refreshProgress = null
+        renderRefreshState()
         mainScope.launch {
             try {
-                val result = refreshAllWishlistPrices()
-                val message = buildString {
-                    append("Checked ${result.checked} item(s): ${result.priceChanges} price change(s) recorded.")
-                    if (result.skipped > 0) append("\n\n${result.skipped} item(s) were checked very recently and were left alone.")
-                    if (result.failed > 0) append("\n\n${result.failed} failed:\n" + result.errors.joinToString("\n"))
+                var progress = startWishlistPriceRefresh()
+                refreshProgress = progress
+                renderRefreshState()
+
+                while (!progress.done) {
+                    delay(POLL_INTERVAL_MS)
+                    progress = fetchWishlistPriceRefreshProgress() ?: break
+                    refreshProgress = progress
+                    renderRefreshState()
                 }
-                alertDialog.show(title = "Prices refreshed", message = message)
+
+                alertDialog.show(title = "Prices refreshed", message = refreshSummaryMessage(progress))
             } catch (e: Exception) {
                 alertDialog.show(title = "Error", message = e.message ?: "Failed to refresh prices.")
             } finally {
                 isRefreshingAll = false
+                refreshProgress = null
+                renderRefreshState()
                 loadAll()
+            }
+        }
+    }
+
+    /**
+     * Redraw the two things a running refresh changes: the progress bar above
+     * the results, and the button that started it. The button lives in the page
+     * shell, which is not re-rendered mid-refresh (that would throw away the
+     * filter fields), so it is patched in place.
+     */
+    private fun renderRefreshState() {
+        renderResults()
+
+        val button = document.getElementById("wishlist-refresh-all") as? HTMLButtonElement ?: return
+        button.disabled = isRefreshingAll
+        button.style.opacity = if (isRefreshingAll) "0.6" else "1"
+        button.innerHTML = ""
+        button.append {
+            span {
+                classes = setOf("mdi", if (isRefreshingAll) "mdi-loading mdi-spin" else "mdi-refresh")
+                style = "font-size: 18px;"
+            }
+            span { +if (isRefreshingAll) "Checking prices..." else "Refresh all prices" }
+        }
+    }
+
+    private fun refreshSummaryMessage(progress: RefreshProgressResponse): String = buildString {
+        if (progress.total == 0) {
+            append("Nothing was due for a price check.")
+        } else {
+            append("Checked ${progress.checkedItems} item(s) across ${progress.completed} page(s): ")
+            append("${progress.priceChanges} price change(s) recorded.")
+        }
+        if (progress.skipped > 0) {
+            append("\n\n${progress.skipped} item(s) were checked very recently and were left alone.")
+        }
+        if (progress.failed > 0) {
+            append("\n\n${progress.failed} failed:\n" + progress.errors.joinToString("\n"))
+        }
+    }
+
+    /** The determinate bar shown while a refresh pass is running. */
+    private fun FlowContent.refreshProgressBar(progress: RefreshProgressResponse) {
+        // Clamped: the total is counted when the pass starts, so a link added
+        // in the moment between could otherwise push it past 100%
+        val fraction = if (progress.total > 0) {
+            (progress.completed.toDouble() / progress.total).coerceIn(0.0, 1.0)
+        } else 0.0
+        div {
+            style = """
+                margin-bottom: 16px; padding: 12px 14px; background-color: #e8f0fe;
+                border-radius: 8px; font-size: 13px; color: #1a56c4;
+            """.trimIndent()
+            div {
+                style = "display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px;"
+                span {
+                    +if (progress.total == 0) "Nothing is due for a price check."
+                    else "Checked ${progress.completed} of ${progress.total} price source" +
+                        (if (progress.total == 1) "" else "s") +
+                        (progress.lastSource?.let { " - $it" } ?: "")
+                }
+                span {
+                    style = "font-weight: 600; white-space: nowrap;"
+                    +"${(fraction * 100).toInt()}%"
+                }
+            }
+            div {
+                style = "height: 6px; background-color: #c6dafc; border-radius: 3px; overflow: hidden;"
+                div {
+                    style = "height: 100%; width: ${(fraction * 100).toInt()}%; " +
+                        "background-color: #1a73e8; border-radius: 3px; transition: width 0.3s ease;"
+                }
+            }
+            if (progress.priceChanges > 0 || progress.failed > 0) {
+                div {
+                    style = "margin-top: 8px; font-size: 12px;"
+                    +buildString {
+                        if (progress.priceChanges > 0) append("${progress.priceChanges} price change(s) so far")
+                        if (progress.priceChanges > 0 && progress.failed > 0) append(", ")
+                        if (progress.failed > 0) append("${progress.failed} failed")
+                    }
+                }
             }
         }
     }
@@ -249,7 +359,10 @@ class WishlistPage(
                 val response = refreshWishlistItemPrice(id)
                 response.item?.let { updated -> items = items.map { if (it.id == id) updated else it } }
                 if (!response.success) {
-                    alertDialog.show(title = "Price check failed", message = response.error ?: "blu-ray.com could not be reached.")
+                        alertDialog.show(
+                            title = "Price check failed",
+                            message = response.error ?: "None of this item's price sources could be reached."
+                        )
                 }
             } catch (e: Exception) {
                 alertDialog.show(title = "Error", message = e.message ?: "Failed to refresh.")
@@ -324,9 +437,14 @@ class WishlistPage(
                         style = "display: flex; gap: 8px; flex-wrap: wrap;"
                         button {
                             id = "wishlist-refresh-all"
-                            style = outlineButtonStyle("#1a73e8") + " height: 40px;"
-                            span { classes = setOf("mdi", "mdi-refresh"); style = "font-size: 18px;" }
-                            +"Refresh all prices"
+                            style = outlineButtonStyle("#1a73e8") + " height: 40px;" +
+                                if (isRefreshingAll) " opacity: 0.6; cursor: default;" else ""
+                            disabled = isRefreshingAll
+                            span {
+                                classes = setOf("mdi", if (isRefreshingAll) "mdi-loading mdi-spin" else "mdi-refresh")
+                                style = "font-size: 18px;"
+                            }
+                            +if (isRefreshingAll) "Checking prices..." else "Refresh all prices"
                             onClickFunction = { refreshAllPrices() }
                         }
                         button {
@@ -413,16 +531,27 @@ class WishlistPage(
 
     // --- Budget picker ---
 
-    /** Items a roll can draw from: still wanted, and with a price to spend. */
-    private fun budgetCandidates(): List<WishlistItem> =
-        items.filter { it.status == WishlistStatus.WISHLIST && it.currentPrice != null }
+    /**
+     * Items a roll can draw from: still wanted, and with a price to spend.
+     * Pre-orders are money committed now for a disc that arrives later, so
+     * they can be left out of a "what can I buy this month" roll.
+     */
+    private fun budgetCandidates(): List<WishlistItem> {
+        val today = todayIso()
+        return items.filter {
+            it.status == WishlistStatus.WISHLIST &&
+                it.currentPrice != null &&
+                !(budgetSkipPreorders && isPreorder(it.releaseDate, today))
+        }
+    }
 
     /** A whole-dollar budget shows as "100" rather than "100.0". */
     private fun formatBudgetForInput(amount: Double): String =
         if (amount == amount.toLong().toDouble()) amount.toLong().toString() else formatMoney(amount).removePrefix("$")
 
     private fun roll() {
-        budgetResult = pickWithinBudget(budgetCandidates(), budgetCount, budgetAmount)
+        val count = if (budgetAnyCount) null else budgetCount
+        budgetResult = pickWithinBudget(budgetCandidates(), count, budgetAmount)
         renderBudgetPicker()
     }
 
@@ -467,7 +596,7 @@ class WishlistPage(
                         }
                         div {
                             style = "font-size: 13px; color: #5f6368; margin-top: 2px;"
-                            +"Randomly picks items from your wishlist that fit a budget"
+                            +"Randomly picks items from your wishlist that fit a budget, with an optional item count"
                         }
                     }
                     span {
@@ -517,7 +646,8 @@ class WishlistPage(
                     attributes["min"] = "1"
                     attributes["max"] = "25"
                     attributes["step"] = "1"
-                    style = formInputStyle()
+                    disabled = budgetAnyCount
+                    style = formInputStyle() + if (budgetAnyCount) " opacity: 0.55;" else ""
                     onInputFunction = { event ->
                         val entered = (event.target as HTMLInputElement).value.toIntOrNull()
                         if (entered != null && entered in 1..25) {
@@ -526,6 +656,41 @@ class WishlistPage(
                         }
                     }
                 }
+            }
+
+            label {
+                style = """
+                    display: flex; align-items: center; gap: 8px; height: 40px; font-size: 14px;
+                    color: #202124; cursor: pointer; user-select: none;
+                """.trimIndent()
+                input(type = InputType.checkBox) {
+                    checked = budgetAnyCount
+                    onChangeFunction = { event ->
+                        budgetAnyCount = (event.target as HTMLInputElement).checked
+                        localStorage.setItem(BUDGET_ANY_COUNT_KEY, budgetAnyCount.toString())
+                        renderBudgetPicker()
+                    }
+                }
+                +"Any number (fill budget)"
+            }
+
+            label {
+                style = """
+                    display: flex; align-items: center; gap: 8px; height: 40px; font-size: 14px;
+                    color: #202124; cursor: pointer; user-select: none;
+                """.trimIndent()
+                attributes["title"] = "Leave out anything whose release date is still ahead"
+                input(type = InputType.checkBox) {
+                    checked = budgetSkipPreorders
+                    onChangeFunction = { event ->
+                        budgetSkipPreorders = (event.target as HTMLInputElement).checked
+                        localStorage.setItem(BUDGET_SKIP_PREORDERS_KEY, budgetSkipPreorders.toString())
+                        // The last roll may hold pre-orders that no longer qualify
+                        syncBudgetPicks()
+                        renderBudgetPicker()
+                    }
+                }
+                +"Skip pre-orders"
             }
 
             button {
@@ -556,9 +721,15 @@ class WishlistPage(
             div {
                 style = "margin-top: 14px; font-size: 13px; color: #5f6368;"
                 +if (candidateCount == 0) {
-                    "None of your wishlist items have a price yet, so there is nothing to pick from."
+                    if (budgetSkipPreorders) {
+                        "No priced wishlist items are out yet, so there is nothing to pick from - untick \"Skip pre-orders\" to include them."
+                    } else {
+                        "None of your wishlist items have a price yet, so there is nothing to pick from."
+                    }
                 } else {
-                    "Drawing from $candidateCount priced wishlist item${if (candidateCount == 1) "" else "s"}, whatever the filters below are set to."
+                    "Drawing from $candidateCount priced wishlist item${if (candidateCount == 1) "" else "s"}" +
+                        (if (budgetSkipPreorders) " that are out" else "") +
+                        ", whatever the filters below are set to."
                 }
             }
             return
@@ -568,8 +739,12 @@ class WishlistPage(
             div {
                 style = "margin-top: 14px; padding: 16px; background-color: #fef7e0; border-radius: 8px; font-size: 14px; color: #b06000;"
                 +when {
+                    result.eligibleCount == 0 && budgetSkipPreorders ->
+                        "No priced wishlist items are out yet - untick \"Skip pre-orders\" to include them."
                     result.eligibleCount == 0 ->
                         "None of your wishlist items have a price yet, so there is nothing to pick from."
+                    result.requestedCount == null && result.minimumBudgetForCount != null ->
+                        "${formatMoney(budgetAmount)} is below the cheapest priced item at ${formatMoney(result.minimumBudgetForCount)}."
                     result.minimumBudgetForCount == null ->
                         "Only ${result.eligibleCount} priced wishlist item${if (result.eligibleCount == 1) "" else "s"} to choose from, fewer than the ${result.requestedCount} asked for."
                     else ->
@@ -584,7 +759,7 @@ class WishlistPage(
             result.picks.forEach { budgetPickRow(it) }
         }
 
-        if (!result.isComplete) {
+        if (!result.isComplete && result.requestedCount != null) {
             div {
                 style = "margin-top: 12px; font-size: 13px; color: #b06000;"
                 +("Only ${result.picks.size} of ${result.requestedCount} items fit in ${formatMoney(budgetAmount)}" +
@@ -650,6 +825,35 @@ class WishlistPage(
         }
     }
 
+    /**
+     * Empty the search and reload. Typing does not reload on its own (the
+     * field reloads on change), but clearing does: the point of the button is
+     * to get the whole list back in one click.
+     */
+    private fun clearSearch() {
+        if (searchText.isBlank()) return
+        searchText = ""
+        (document.getElementById(SEARCH_INPUT_ID) as? HTMLInputElement)?.value = ""
+        syncSearchClear()
+        reload()
+    }
+
+    /**
+     * Show the clear button only when there is something to clear. Patched in
+     * place rather than re-rendered, which would take the focus out of the
+     * field mid-word.
+     */
+    private fun syncSearchClear() {
+        (document.getElementById("$SEARCH_INPUT_ID-clear") as? HTMLElement)
+            ?.setAttribute("style", searchClearStyle(searchText.isNotBlank()))
+    }
+
+    private fun searchClearStyle(visible: Boolean): String = """
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; padding: 4px; cursor: pointer; color: #5f6368;
+        display: ${if (visible) "flex" else "none"}; align-items: center;
+    """.trimIndent()
+
     private fun FlowContent.renderFilters() {
         div {
             style = """
@@ -660,12 +864,28 @@ class WishlistPage(
             div {
                 style = "flex: 2 1 240px; min-width: 200px;"
                 formLabel("Search")
-                input(type = InputType.text) {
-                    value = searchText
-                    placeholder = "Title, film, distributor, tag or note"
-                    style = formInputStyle()
-                    onInputFunction = { event -> searchText = (event.target as HTMLInputElement).value }
-                    onChangeFunction = { reload() }
+                div {
+                    style = "position: relative;"
+                    input(type = InputType.text) {
+                        id = SEARCH_INPUT_ID
+                        value = searchText
+                        placeholder = "Title, film, distributor, tag or note"
+                        // Room on the right for the clear button
+                        style = formInputStyle() + " padding-right: 34px;"
+                        onInputFunction = { event ->
+                            searchText = (event.target as HTMLInputElement).value
+                            syncSearchClear()
+                        }
+                        onChangeFunction = { reload() }
+                    }
+                    button {
+                        id = "$SEARCH_INPUT_ID-clear"
+                        attributes["title"] = "Clear the search"
+                        attributes["type"] = "button"
+                        style = searchClearStyle(searchText.isNotBlank())
+                        span { classes = setOf("mdi", "mdi-close"); style = "font-size: 18px;" }
+                        onClickFunction = { clearSearch() }
+                    }
                 }
             }
 
@@ -820,6 +1040,8 @@ class WishlistPage(
                 return@append
             }
 
+            refreshProgress?.let { progress -> div { refreshProgressBar(progress) } }
+
             val visible = visibleItems()
             if (visible.isEmpty()) {
                 div {
@@ -840,11 +1062,13 @@ class WishlistPage(
             div {
                 style = "margin-bottom: 16px; color: #5f6368; font-size: 14px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
                 span { +"${visible.size} item${if (visible.size == 1) "" else "s"}" }
-                if (isRefreshingAll || isLoading) {
+                // The refresh pass has a bar of its own above; this is only for
+                // the list reloading
+                if (isLoading) {
                     span {
                         style = "display: inline-flex; align-items: center; gap: 6px; color: #1a73e8;"
                         span { classes = setOf("mdi", "mdi-loading", "mdi-spin"); style = "font-size: 16px;" }
-                        +if (isRefreshingAll) "Checking blu-ray.com for every item..." else "Refreshing..."
+                        +"Refreshing..."
                     }
                 }
             }
@@ -876,8 +1100,10 @@ class WishlistPage(
     private fun grouped(visible: List<WishlistItem>): List<Pair<String, List<WishlistItem>>> {
         val today = todayIso()
         return when (groupBy) {
-            GroupBy.NONE -> listOf("" to visible)
-            GroupBy.STATUS -> WishlistStatus.entries.map { s -> statusLabel(s) to visible.filter { it.status == s } }
+            // Ungrouped still floats the things already paid for to the top,
+            // keeping the sort within each status band
+            GroupBy.NONE -> listOf("" to visible.sortedBy { WISHLIST_STATUS_DISPLAY_ORDER.indexOf(it.status) })
+            GroupBy.STATUS -> WISHLIST_STATUS_DISPLAY_ORDER.map { s -> statusLabel(s) to visible.filter { it.status == s } }
             GroupBy.PRIORITY -> WishlistPriority.entries.map { p -> "${priorityLabel(p)} priority" to visible.filter { it.priority == p } }
             GroupBy.FORMAT -> {
                 val byFormat = MediaType.entries.map { t -> mediaTypeLabel(t) to visible.filter { t in it.mediaTypes } }
@@ -982,15 +1208,23 @@ class WishlistPage(
                     }
                 }
                 div { style = "flex: 1;" }
-                if (!item.blurayComUrl.isNullOrBlank() && item.status != WishlistStatus.OWNED) {
+                // Stores whose prices are typed in have nothing to fetch, so an
+                // item tracked only that way gets no check button.
+                val checkable = item.vendorLinks.filter { it.reader.isAutomatic }
+                val hasPriceSource = !item.blurayComUrl.isNullOrBlank() || checkable.isNotEmpty()
+                if (hasPriceSource && item.status != WishlistStatus.OWNED) {
                     if (item.id in refreshingIds) {
                         span {
                             style = "color: #1a73e8; padding: 6px; display: inline-flex;"
-                            attributes["title"] = "Checking blu-ray.com..."
+                            attributes["title"] = "Checking prices..."
                             span { classes = setOf("mdi", "mdi-loading", "mdi-spin"); style = "font-size: 18px;" }
                         }
                     } else {
-                        iconButton("mdi-refresh", "Check price on blu-ray.com") { quickRefresh(item) }
+                        val where = listOfNotNull(
+                            item.blurayComUrl?.takeIf { it.isNotBlank() }?.let { "blu-ray.com" },
+                            *checkable.map { it.vendor }.toTypedArray()
+                        )
+                        iconButton("mdi-refresh", "Check price at ${where.joinToString(", ")}") { quickRefresh(item) }
                     }
                 }
                 iconButton("mdi-pencil-outline", "Edit") { openEditForm(item) }

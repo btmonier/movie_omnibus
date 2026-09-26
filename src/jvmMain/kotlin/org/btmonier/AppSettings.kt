@@ -66,8 +66,25 @@ object AppSettings {
     }
 
     /**
-     * How many blu-ray.com pages a refresh pass fetches at once. Dial down to
-     * 1 to go back to one request at a time. Set
+     * Which stores are checked for prices alongside blu-ray.com, as a
+     * comma-separated list of names from [SHOPIFY_STORES]. Defaults to all of
+     * them; set `WISHLIST_VENDOR_STORES` or `wishlist.vendorStores` to narrow
+     * it, or to `none` to switch store price tracking off entirely without
+     * losing the links already recorded.
+     */
+    val wishlistVendorStores: List<String> by lazy {
+        val configured = (System.getenv("WISHLIST_VENDOR_STORES") ?: props?.getProperty("wishlist.vendorStores"))
+            ?.trim()
+            ?.takeIf { it.isNotEmpty() }
+            ?: return@lazy SHOPIFY_STORES.map { it.vendorName }
+
+        if (configured.equals("none", ignoreCase = true)) emptyList()
+        else configured.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    }
+
+    /**
+     * How many pages a refresh pass fetches from any one site at once. Dial
+     * down to 1 to go back to one request at a time. Set
      * `WISHLIST_PRICE_CONCURRENCY` or `wishlist.priceConcurrency`.
      */
     val wishlistPriceConcurrency: Int by lazy {

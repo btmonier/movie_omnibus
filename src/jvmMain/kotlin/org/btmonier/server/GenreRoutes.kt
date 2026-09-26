@@ -28,6 +28,7 @@ fun Route.genreRoutes(dao: CategoryDao) {
     simpleCategoryRoutes(dao, CategoryType.GENRE, "Genre")
     simpleCategoryRoutes(dao, CategoryType.SUBGENRE, "Subgenre")
     simpleCategoryRoutes(dao, CategoryType.DISTRIBUTOR, "Distributor")
+    simpleCategoryRoutes(dao, CategoryType.STORE, "Store")
 }
 
 /**

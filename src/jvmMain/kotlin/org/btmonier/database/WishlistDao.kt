@@ -7,12 +7,16 @@ import org.btmonier.PriceObservation
 import org.btmonier.PriceSource
 import org.btmonier.Purchase
 import org.btmonier.Release
+import org.btmonier.VendorLink
+import org.btmonier.VendorLinkReader
+import org.btmonier.VendorPrice
 import org.btmonier.WishlistItem
 import org.btmonier.WishlistMovie
 import org.btmonier.WishlistPriority
 import org.btmonier.WishlistStatus
 import org.btmonier.WishlistSummary
 import org.btmonier.WishlistTransitionRequest
+import org.btmonier.derivePrices
 import org.btmonier.storage.GcsService
 import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
@@ -55,6 +59,18 @@ data class WishlistFilters(
 )
 
 /**
+ * One page to re-check for an item. [vendor] names the store for a vendor
+ * link, and is null for the item's own blu-ray.com page. [reader] says which
+ * code reads the page, for the stores that have no reader of their own.
+ */
+data class RefreshTarget(
+    val itemId: Int,
+    val url: String,
+    val vendor: String? = null,
+    val reader: VendorLinkReader? = null
+)
+
+/**
  * Result of moving an item to a new status.
  */
 sealed interface TransitionOutcome {
@@ -77,9 +93,6 @@ class WishlistDao(
     private val purchaseDao: PurchaseDao = PurchaseDao()
 ) {
     private val categoryDao = CategoryDao()
-
-    /** Sources that reflect what an item sells for right now. */
-    private val sellingSources = setOf(PriceSource.AMAZON, PriceSource.NEW_FROM, PriceSource.MANUAL)
 
     // --- Reads ---
 
@@ -141,23 +154,68 @@ class WishlistDao(
     }
 
     /**
-     * Items whose price should be re-scraped: those with a blu-ray.com URL that
-     * are not yet owned (or every item, with [includeAll]) and were last checked
-     * more than [minAgeHours] ago (or never).
+     * Every page that should be re-scraped: the blu-ray.com page and each
+     * linked store page of the items that are not yet owned (or of every item,
+     * with [includeAll]) and were last checked more than [minAgeHours] ago (or
+     * never). An item with no sources at all contributes nothing.
+     *
+     * Links whose prices are typed in by hand are left out - there is nothing
+     * to fetch, and including them would make every pass report a failure.
      */
-    suspend fun itemsDueForRefresh(minAgeHours: Double? = null, includeAll: Boolean = false): List<Pair<Int, String>> =
+    suspend fun itemsDueForRefresh(minAgeHours: Double? = null, includeAll: Boolean = false): List<RefreshTarget> =
         DatabaseFactory.dbQuery {
             val cutoff = minAgeHours?.let { LocalDateTime.now().minusMinutes((it * 60).toLong()) }
-            WishlistItems.selectAll()
-                .where { WishlistItems.blurayComUrl.isNotNull() }
+            val due = WishlistItems.selectAll()
                 .filter { row ->
                     val status = statusOf(row[WishlistItems.status])
                     val eligible = includeAll || status == WishlistStatus.WISHLIST || status == WishlistStatus.ORDERED
                     val lastCheck = row[WishlistItems.lastPriceCheckAt]
                     eligible && (cutoff == null || lastCheck == null || lastCheck.isBefore(cutoff))
                 }
-                .map { it[WishlistItems.id].value to it[WishlistItems.blurayComUrl]!! }
+
+            val ids = due.map { it[WishlistItems.id].value }
+            val links = if (ids.isEmpty()) emptyMap() else {
+                (WishlistItemVendorLinks innerJoin Stores).selectAll()
+                    .where { WishlistItemVendorLinks.itemId inList ids }
+                    .mapNotNull { row -> targetFor(row[WishlistItemVendorLinks.itemId].value, row) }
+                    .groupBy { it.itemId }
+            }
+
+            due.flatMap { row ->
+                val id = row[WishlistItems.id].value
+                buildList {
+                    row[WishlistItems.blurayComUrl]?.takeIf { it.isNotBlank() }?.let { add(RefreshTarget(id, it)) }
+                    addAll(links[id].orEmpty())
+                }
+            }
         }
+
+    /** Every page to re-check for one item, in the same shape as [itemsDueForRefresh]. */
+    suspend fun refreshTargetsFor(id: Int): List<RefreshTarget> = DatabaseFactory.dbQuery {
+        val row = WishlistItems.selectAll().where { WishlistItems.id eq id }.firstOrNull() ?: return@dbQuery emptyList()
+        buildList {
+            row[WishlistItems.blurayComUrl]?.takeIf { it.isNotBlank() }?.let { add(RefreshTarget(id, it)) }
+            (WishlistItemVendorLinks innerJoin Stores).selectAll()
+                .where { WishlistItemVendorLinks.itemId eq id }
+                .mapNotNull { targetFor(id, it) }
+                .forEach { add(it) }
+        }
+    }
+
+    /**
+     * One vendor link as a refresh target, or null when nothing can read it.
+     * [row] must come from a query joining [Stores], which names the store.
+     */
+    private fun targetFor(itemId: Int, row: ResultRow): RefreshTarget? {
+        val reader = readerOf(row[WishlistItemVendorLinks.reader])
+        if (!reader.isAutomatic) return null
+        return RefreshTarget(
+            itemId = itemId,
+            url = row[WishlistItemVendorLinks.url],
+            vendor = row[Stores.name],
+            reader = reader
+        )
+    }
 
     // --- Writes ---
 
@@ -207,6 +265,7 @@ class WishlistDao(
         WishlistItemImages.deleteWhere { itemId eq id }
         WishlistItemTags.deleteWhere { itemId eq id }
         WishlistItemMovies.deleteWhere { itemId eq id }
+        WishlistItemVendorLinks.deleteWhere { itemId eq id }
         WishlistPriceHistory.deleteWhere { itemId eq id }
         WishlistItems.deleteWhere { WishlistItems.id eq id } > 0
     }
@@ -222,6 +281,69 @@ class WishlistDao(
     }
 
     /**
+     * Track an item at a store product page. A store holds one page per item,
+     * so re-picking from the search replaces the previous URL rather than
+     * adding a second row. Returns the stored link, or null when the item does
+     * not exist.
+     */
+    suspend fun setVendorLink(
+        id: Int,
+        vendorName: String,
+        productUrl: String,
+        reader: VendorLinkReader = VendorLinkReader.STORE
+    ): VendorLink? = DatabaseFactory.dbQuery {
+        if (!exists(id)) return@dbQuery null
+        val cleanVendor = vendorName.trim()
+        val cleanUrl = productUrl.trim()
+        if (cleanVendor.isEmpty() || cleanUrl.isEmpty()) return@dbQuery null
+
+        val store = resolveStore(cleanVendor)
+        val existing = WishlistItemVendorLinks.selectAll()
+            .where { (WishlistItemVendorLinks.itemId eq id) and (WishlistItemVendorLinks.storeId eq store) }
+            .firstOrNull()
+
+        val linkId = if (existing == null) {
+            WishlistItemVendorLinks.insertAndGetId {
+                it[itemId] = id
+                it[storeId] = store
+                it[url] = cleanUrl
+                it[WishlistItemVendorLinks.reader] = reader.name
+            }.value
+        } else {
+            WishlistItemVendorLinks.update({ WishlistItemVendorLinks.id eq existing[WishlistItemVendorLinks.id] }) {
+                it[url] = cleanUrl
+                it[WishlistItemVendorLinks.reader] = reader.name
+                it[lastCheckedAt] = null
+                it[lastError] = null
+            }
+            existing[WishlistItemVendorLinks.id].value
+        }
+
+        VendorLink(vendor = cleanVendor, url = cleanUrl, reader = reader, id = linkId)
+    }
+
+    /** Stop tracking an item at one store. Its price history is kept. */
+    suspend fun deleteVendorLink(id: Int, linkId: Int): Boolean = DatabaseFactory.dbQuery {
+        WishlistItemVendorLinks.deleteWhere {
+            (WishlistItemVendorLinks.id eq linkId) and (itemId eq id)
+        } > 0
+    }
+
+    /**
+     * Note when a store was last checked and whether it failed. Returns false
+     * when the item is not tracked at that store.
+     */
+    private fun markVendorLinkChecked(id: Int, vendorName: String, error: String?): Boolean {
+        val store = existingStoreId(vendorName) ?: return false
+        return WishlistItemVendorLinks.update({
+            (WishlistItemVendorLinks.itemId eq id) and (WishlistItemVendorLinks.storeId eq store)
+        }) {
+            it[lastCheckedAt] = LocalDateTime.now()
+            it[lastError] = error
+        } > 0
+    }
+
+    /**
      * Log a price seen somewhere (a store, eBay, a sale email). Returns the
      * observation id, or null when the item does not exist.
      */
@@ -230,15 +352,36 @@ class WishlistDao(
         WishlistPriceHistory.insertAndGetId {
             it[itemId] = id
             it[priceSource] = observation.source.name
-            it[vendor] = observation.vendor?.trim()?.takeIf(String::isNotEmpty)
+            it[storeId] = observation.vendor?.trim()?.takeIf(String::isNotEmpty)?.let(::resolveStore)
             it[price] = BigDecimal.valueOf(org.btmonier.roundToCents(observation.price))
             it[inStock] = observation.inStock
             it[note] = observation.note?.trim()?.takeIf(String::isNotEmpty)
+            it[url] = observation.url?.trim()?.takeIf(String::isNotEmpty)
             observation.observedAt?.let { at ->
                 runCatching { LocalDateTime.parse(at) }.getOrNull()?.let { parsed -> it[observedAt] = parsed }
             }
         }.value
     }
+
+    /**
+     * Correct a price that was logged by hand - a typo, the wrong store, a
+     * link that was missing. Only the rows typed in are editable; a scraped
+     * row is a record of what a site said at a moment, so it can be deleted
+     * but not rewritten. Returns false when there is no such logged row.
+     */
+    suspend fun updateObservation(id: Int, observationId: Int, observation: PriceObservation): Boolean =
+        DatabaseFactory.dbQuery {
+            WishlistPriceHistory.update({
+                (WishlistPriceHistory.id eq observationId) and
+                    (WishlistPriceHistory.itemId eq id) and
+                    (WishlistPriceHistory.priceSource eq PriceSource.MANUAL.name)
+            }) {
+                it[storeId] = observation.vendor?.trim()?.takeIf(String::isNotEmpty)?.let(::resolveStore)
+                it[price] = BigDecimal.valueOf(org.btmonier.roundToCents(observation.price))
+                it[note] = observation.note?.trim()?.takeIf(String::isNotEmpty)
+                it[url] = observation.url?.trim()?.takeIf(String::isNotEmpty)
+            } > 0
+        }
 
     suspend fun deleteObservation(id: Int, observationId: Int): Boolean = DatabaseFactory.dbQuery {
         WishlistPriceHistory.deleteWhere {
@@ -272,24 +415,100 @@ class WishlistDao(
         var added = 0
         scraped.forEach { (source, value) ->
             if (value == null) return@forEach
-            val last = WishlistPriceHistory.selectAll()
-                .where { (WishlistPriceHistory.itemId eq id) and (WishlistPriceHistory.priceSource eq source.name) }
-                .orderBy(WishlistPriceHistory.observedAt to SortOrder.DESC, WishlistPriceHistory.id to SortOrder.DESC)
-                .limit(1)
-                .firstOrNull()
-            val lastPrice = last?.get(WishlistPriceHistory.price)?.toDouble()
-            if (lastPrice == null || lastPrice != value) {
-                WishlistPriceHistory.insert {
-                    it[itemId] = id
-                    it[priceSource] = source.name
-                    it[price] = BigDecimal.valueOf(value)
-                    it[inStock] = if (source == PriceSource.BLURAY_LIST) null else prices.inStock
-                }
-                added++
-            }
+            val changed = appendIfChanged(
+                id = id,
+                source = source,
+                store = null,
+                value = value,
+                stock = if (source == PriceSource.BLURAY_LIST) null else prices.inStock
+            )
+            if (changed) added++
         }
         added
     }
+
+    /**
+     * Store what one store is asking. The store's own history is independent of
+     * every other source, so checking one store never reads as a price change
+     * at another. Returns 1 when the price had changed, 0 when it had not, or
+     * -1 when the item does not exist.
+     *
+     * The item's list price is filled in from the store only when nothing has
+     * supplied one yet, so a hand-entered item still gets a "% off" to measure
+     * against without a store overwriting the blu-ray.com MSRP.
+     */
+    suspend fun recordVendorPrice(id: Int, vendorName: String, prices: VendorPrice): Int = DatabaseFactory.dbQuery {
+        if (!exists(id)) return@dbQuery -1
+        markVendorLinkChecked(id, vendorName, error = null)
+
+        val current = WishlistItems.selectAll().where { WishlistItems.id eq id }.first()
+        WishlistItems.update({ WishlistItems.id eq id }) {
+            it[lastPriceCheckAt] = LocalDateTime.now()
+            if (current[WishlistItems.listPrice] == null) {
+                prices.listPrice?.let { value -> it[listPrice] = BigDecimal.valueOf(org.btmonier.roundToCents(value)) }
+            }
+        }
+
+        val price = prices.price ?: return@dbQuery 0
+        if (appendIfChanged(id, PriceSource.VENDOR, resolveStore(vendorName), price, prices.inStock)) 1 else 0
+    }
+
+    /**
+     * Record that a store check failed, so the item can say which store has
+     * gone quiet rather than silently keeping a stale price.
+     */
+    suspend fun recordVendorError(id: Int, vendorName: String, message: String): Boolean = DatabaseFactory.dbQuery {
+        markVendorLinkChecked(id, vendorName, error = message)
+    }
+
+    /**
+     * Append a price for one series - one (source, store) pair - but only when
+     * it differs from that series' most recent value, which is what keeps the
+     * history a change log rather than a poll log. Returns true when a row was
+     * written.
+     */
+    private fun appendIfChanged(
+        id: Int,
+        source: PriceSource,
+        store: EntityID<Int>?,
+        value: Double,
+        stock: Boolean?
+    ): Boolean {
+        val rounded = org.btmonier.roundToCents(value)
+        val lastPrice = WishlistPriceHistory.selectAll()
+            .where {
+                (WishlistPriceHistory.itemId eq id) and
+                    (WishlistPriceHistory.priceSource eq source.name) and
+                    if (store == null) WishlistPriceHistory.storeId.isNull()
+                    else (WishlistPriceHistory.storeId eq store)
+            }
+            .orderBy(WishlistPriceHistory.observedAt to SortOrder.DESC, WishlistPriceHistory.id to SortOrder.DESC)
+            .limit(1)
+            .firstOrNull()
+            ?.get(WishlistPriceHistory.price)?.toDouble()
+
+        if (lastPrice != null && lastPrice == rounded) return false
+
+        WishlistPriceHistory.insert {
+            it[itemId] = id
+            it[priceSource] = source.name
+            it[storeId] = store
+            it[price] = BigDecimal.valueOf(rounded)
+            it[inStock] = stock
+        }
+        return true
+    }
+
+    /** The store with this name, adding it to the lookup table when it is new. */
+    private fun resolveStore(name: String): EntityID<Int> =
+        EntityID(categoryDao.getOrCreateInTransaction(CategoryType.STORE, name.trim()), Stores)
+
+    /** The store with this name, or null when no such store is recorded. */
+    private fun existingStoreId(name: String): EntityID<Int>? =
+        Stores.selectAll()
+            .where { Stores.name.lowerCase() eq name.trim().lowercase() }
+            .firstOrNull()
+            ?.get(Stores.id)
 
     /**
      * Move an item along the wishlist -> ordered -> shipped -> owned path (or
@@ -449,6 +668,10 @@ class WishlistDao(
                 )
             }
 
+        // Small enough to read whole: names are needed by price history, vendor
+        // links and purchases alike
+        val storeNames = purchaseDao.storeNamesInTransaction()
+
         val history = WishlistPriceHistory.selectAll().where { WishlistPriceHistory.itemId inList ids }
             .orderBy(WishlistPriceHistory.observedAt to SortOrder.ASC, WishlistPriceHistory.id to SortOrder.ASC)
             .groupBy({ it[WishlistPriceHistory.itemId].value }) {
@@ -456,16 +679,29 @@ class WishlistDao(
                     source = PriceSource.entries.firstOrNull { s -> s.name == it[WishlistPriceHistory.priceSource] }
                         ?: PriceSource.MANUAL,
                     price = it[WishlistPriceHistory.price].toDouble(),
-                    vendor = it[WishlistPriceHistory.vendor],
+                    vendor = it[WishlistPriceHistory.storeId]?.let { store -> storeNames[store.value] },
                     inStock = it[WishlistPriceHistory.inStock],
                     observedAt = it[WishlistPriceHistory.observedAt].toString(),
                     note = it[WishlistPriceHistory.note],
+                    url = it[WishlistPriceHistory.url],
                     id = it[WishlistPriceHistory.id].value
                 )
             }
 
+        val vendorLinks = WishlistItemVendorLinks.selectAll().where { WishlistItemVendorLinks.itemId inList ids }
+            .groupBy({ it[WishlistItemVendorLinks.itemId].value }) {
+                VendorLink(
+                    vendor = storeNames[it[WishlistItemVendorLinks.storeId].value] ?: "Unknown store",
+                    url = it[WishlistItemVendorLinks.url],
+                    reader = readerOf(it[WishlistItemVendorLinks.reader]),
+                    lastCheckedAt = it[WishlistItemVendorLinks.lastCheckedAt]?.toString(),
+                    lastError = it[WishlistItemVendorLinks.lastError],
+                    id = it[WishlistItemVendorLinks.id].value
+                )
+            }
+
         val purchases = Purchases.selectAll().where { Purchases.wishlistItemId inList ids }
-            .associate { it[Purchases.wishlistItemId]!!.value to purchaseDao.rowToPurchase(it) }
+            .associate { it[Purchases.wishlistItemId]!!.value to purchaseDao.rowToPurchase(it, storeNames) }
 
         val distributorIds = rows.mapNotNull { it[WishlistItems.distributorId] }.distinct()
         val distributors = if (distributorIds.isEmpty()) emptyMap() else {
@@ -495,6 +731,7 @@ class WishlistDao(
                 notes = row[WishlistItems.notes],
                 tags = tags[id].orEmpty().sortedBy { it.lowercase() },
                 linkedMovies = movies[id].orEmpty().sortedBy { it.title.lowercase() },
+                vendorLinks = vendorLinks[id].orEmpty().sortedBy { it.vendor.lowercase() },
                 currentPrice = derived.current?.price,
                 currentPriceSource = derived.current?.source,
                 previousPrice = derived.previous,
@@ -511,29 +748,15 @@ class WishlistDao(
         }
     }
 
-    private data class DerivedPrices(val current: PriceObservation?, val previous: Double?, val lowest: Double?)
-
-    /**
-     * The current price is the best of each selling source's latest value; the
-     * previous price is that source's observation before it; the lowest is the
-     * cheapest selling price ever seen. Used prices and the MSRP are ignored.
-     */
-    private fun derivePrices(history: List<PriceObservation>): DerivedPrices {
-        val selling = history.filter { it.source in sellingSources }
-        if (selling.isEmpty()) return DerivedPrices(null, null, null)
-
-        val latestPerSource = selling.groupBy { it.source }.mapValues { (_, obs) -> obs.last() }
-        val current = latestPerSource.values.minBy { it.price }
-        val previous = selling.filter { it.source == current.source }.dropLast(1).lastOrNull()?.price
-        val lowest = selling.minOf { it.price }
-        return DerivedPrices(current, previous, lowest)
-    }
-
     private fun statusOf(value: String): WishlistStatus =
         WishlistStatus.entries.firstOrNull { it.name == value } ?: WishlistStatus.WISHLIST
 
     private fun priorityOf(value: String): WishlistPriority =
         WishlistPriority.entries.firstOrNull { it.name == value } ?: WishlistPriority.MEDIUM
+
+    /** A link with no recorded reader is one of the registered stores. */
+    private fun readerOf(value: String?): VendorLinkReader =
+        VendorLinkReader.entries.firstOrNull { it.name == value } ?: VendorLinkReader.STORE
 
     private fun matches(item: WishlistItem, filters: WishlistFilters): Boolean {
         filters.search?.trim()?.takeIf { it.isNotEmpty() }?.let { query ->

@@ -74,4 +74,28 @@ class WishlistGroupingTest {
         assertEquals(WishlistStatus.OWNED, WishlistStatus.SHIPPED.next())
         assertEquals(null, WishlistStatus.OWNED.next())
     }
+
+    @Test
+    fun `things already paid for are shown above things still wanted`() {
+        assertEquals(
+            listOf(WishlistStatus.ORDERED, WishlistStatus.SHIPPED, WishlistStatus.WISHLIST, WishlistStatus.OWNED),
+            WISHLIST_STATUS_DISPLAY_ORDER
+        )
+        // Every status has a place, or grouping by status would drop items
+        assertEquals(WishlistStatus.entries.toSet(), WISHLIST_STATUS_DISPLAY_ORDER.toSet())
+    }
+
+    @Test
+    fun `isPreorder covers anything not out yet`() {
+        val today = "2026-09-05"
+        assertFalse(isPreorder(null, today))
+        assertFalse(isPreorder("", today))
+        assertFalse(isPreorder("2026-09-05", today), "out today is out")
+        assertFalse(isPreorder("2023-07-11", today))
+        // Both the "Out this month" and "Pre-order" buckets are pre-orders:
+        // neither can be had now
+        assertTrue(isPreorder("2026-09-30", today))
+        assertTrue(isPreorder("2026-10-01", today))
+        assertTrue(isPreorder("2027-01-15", today))
+    }
 }

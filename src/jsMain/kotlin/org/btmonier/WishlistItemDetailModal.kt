@@ -13,9 +13,10 @@ private const val DETAIL_ID = "wishlist-item-detail"
 
 /**
  * Everything about one wishlist item: cover, formats, the price picture
- * (current, list, lowest, target), external links, tags, films, the purchase
- * once there is one, and the full price history with a sparkline. Prices can
- * be refreshed from blu-ray.com or logged by hand from here.
+ * (current, list, lowest, target), the stores it is tracked at, external
+ * links, tags, films, the purchase once there is one, and the full price
+ * history with a sparkline. Prices can be refreshed from every source at
+ * once, or logged by hand from here.
  */
 class WishlistItemDetailModal(
     private val container: Element,
@@ -30,7 +31,35 @@ class WishlistItemDetailModal(
     private var isRefreshing = false
     private var showLogForm = false
 
-    fun show() = render()
+    // The store a logged price belongs to, and its page, when the form was
+    // opened from one of the linked stores rather than the history header.
+    private var logVendor: String? = null
+    private var logUrl: String? = null
+
+    // The logged price being corrected, when the form is in edit mode.
+    private var editingObservation: PriceObservation? = null
+
+    // "Find on other stores" state
+    private var showStoreSearch = false
+    private var isSearchingStores = false
+    private var storeCandidates: List<VendorCandidate> = emptyList()
+    private var storeSearchMessage: String? = null
+    private var storeQuery: String? = null
+    private var searchedOnce = false
+    private var linkingUrl: String? = null
+
+    // "Add by URL" state, for stores the search does not cover
+    private var showAddLink = false
+    private var isAddingLink = false
+    private var addLinkMessage: String? = null
+
+    fun show() {
+        render()
+        mainScope.launch {
+            StoreOptions.ensureLoaded()
+            if (document.getElementById(DETAIL_ID) != null && (showLogForm || showAddLink)) render()
+        }
+    }
 
     fun close() {
         document.getElementById(DETAIL_ID)?.remove()
@@ -61,6 +90,7 @@ class WishlistItemDetailModal(
                     div {
                         style = "padding: 20px 24px 24px 24px;"
                         priceBlock()
+                        storesBlock()
                         linksRow()
                         if (item.tags.isNotEmpty() || item.linkedMovies.isNotEmpty() || !item.notes.isNullOrBlank()) metaBlock()
                         item.purchase?.let { purchaseBlock(it) }
@@ -132,9 +162,13 @@ class WishlistItemDetailModal(
     }
 
     private fun FlowContent.priceBlock() {
+        // Derived here as well as on the server so the "Current" figure can be
+        // credited to the store that is actually asking it.
+        val cheapest = derivePrices(item.priceHistory).current
+
         div {
             style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 16px;"
-            priceStat("Current", item.currentPrice, item.currentPriceSource?.let { priceSourceLabel(it) }, highlight = true)
+            priceStat("Current", item.currentPrice, cheapest?.let { priceOriginLabel(it) }, highlight = true)
             priceStat("List price", item.listPrice, item.percentOffList?.let { "$it% off now" })
             priceStat("Lowest seen", item.lowestPrice, null)
             priceStat("Target", item.targetPrice, if (item.targetPrice == null) "Not set" else if (item.atTarget) "Reached" else null)
@@ -156,6 +190,286 @@ class WishlistItemDetailModal(
                 +formatMoney(value)
             }
             sub?.let { div { style = "font-size: 11px; color: #80868b; margin-top: 2px;"; +it } }
+        }
+    }
+
+    /**
+     * The stores this item is tracked at, each with what it is asking, and the
+     * two ways to add another: the search across the stores with readers, and
+     * a URL from anywhere else. A store that failed its last check says so here
+     * rather than quietly serving a stale price.
+     */
+    private fun FlowContent.storesBlock() {
+        div {
+            style = "border: 1px solid #e8eaed; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;"
+            div {
+                style = "display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;"
+                h3 {
+                    style = "margin: 0; font-size: 15px; color: #202124; display: flex; align-items: center; gap: 8px;"
+                    span { classes = setOf("mdi", "mdi-storefront-outline"); style = "color: #1a73e8; font-size: 18px;" }
+                    +"Stores"
+                }
+                div {
+                    style = "display: flex; gap: 8px; flex-wrap: wrap;"
+                    button {
+                        style = outlineButtonStyle("#1a73e8")
+                        span { classes = setOf("mdi", "mdi-magnify"); style = "font-size: 16px;" }
+                        +if (showStoreSearch) "Hide search" else "Find on other stores"
+                        onClickFunction = {
+                            showStoreSearch = !showStoreSearch
+                            render()
+                            if (showStoreSearch && !searchedOnce) searchStores(item.title)
+                        }
+                    }
+                    button {
+                        style = outlineButtonStyle("#7627bb")
+                        span { classes = setOf("mdi", "mdi-link-plus"); style = "font-size: 16px;" }
+                        +if (showAddLink) "Hide" else "Add by URL"
+                        onClickFunction = {
+                            showAddLink = !showAddLink
+                            addLinkMessage = null
+                            render()
+                        }
+                    }
+                }
+            }
+
+            if (item.vendorLinks.isEmpty()) {
+                div {
+                    style = "padding: 10px 0 2px 0; color: #80868b; font-size: 13px;"
+                    +"Not tracked at any store yet. Search for it and pick the right edition, or paste the URL of a shop the search does not cover."
+                }
+            } else {
+                table {
+                    style = "width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px;"
+                    tbody {
+                        item.vendorLinks.forEach { link -> vendorLinkRow(link) }
+                    }
+                }
+            }
+
+            if (showAddLink) addLinkPanel()
+            if (showStoreSearch) storeSearchPanel()
+        }
+    }
+
+    /**
+     * Track a page the store search cannot reach - a label's own shop, an
+     * exclusive sold nowhere else. The price is read from the page when it
+     * publishes one in a form that can be read; the price field is for the
+     * pages that do not, so the link is still worth something.
+     */
+    private fun FlowContent.addLinkPanel() {
+        div {
+            style = "margin-top: 14px; padding: 12px; background-color: #f8f9fa; border-radius: 6px;"
+            div {
+                style = "display: grid; grid-template-columns: 2fr 1fr 100px auto; gap: 8px; align-items: end;"
+                div {
+                    formLabel("Product page URL")
+                    input(type = InputType.text) {
+                        id = "$DETAIL_ID-link-url"
+                        placeholder = "https://..."
+                        style = formInputStyle()
+                    }
+                }
+                div {
+                    formLabel("Store name")
+                    storeSelect(
+                        idPrefix = "$DETAIL_ID-link-vendor",
+                        stores = storeOptions(),
+                        emptyLabel = "From the address"
+                    )
+                }
+                div {
+                    formLabel("Price")
+                    input(type = InputType.number) {
+                        id = "$DETAIL_ID-link-price"
+                        attributes["step"] = "0.01"
+                        attributes["min"] = "0"
+                        placeholder = "0.00"
+                        style = formInputStyle()
+                    }
+                }
+                button {
+                    style = primaryButtonStyle("#7627bb") + " height: 40px;"
+                    disabled = isAddingLink
+                    span {
+                        classes = setOf("mdi", if (isAddingLink) "mdi-loading mdi-spin" else "mdi-plus")
+                        style = "font-size: 16px;"
+                    }
+                    +if (isAddingLink) "Checking..." else "Track"
+                    onClickFunction = { addLinkByUrl() }
+                }
+            }
+            div {
+                style = "margin-top: 8px; font-size: 12px; color: #80868b;"
+                +(addLinkMessage
+                    ?: "The page is read for a price if it publishes one. If it does not, the store is kept as a link and its prices are typed in by hand.")
+            }
+        }
+    }
+
+    private fun TBODY.vendorLinkRow(link: VendorLink) {
+        val latest = item.priceHistory.latestFromVendor(link.vendor)
+        tr {
+            style = "border-top: 1px solid #f1f3f4;"
+            td {
+                style = "padding: 8px 4px;"
+                a(href = link.url, target = "_blank") {
+                    style = "color: #1a73e8; text-decoration: none; font-weight: 500;"
+                    attributes["rel"] = "noopener"
+                    +link.vendor
+                }
+                link.lastError?.let {
+                    div {
+                        style = "color: #c5221f; font-size: 12px; margin-top: 2px;"
+                        span { classes = setOf("mdi", "mdi-alert-outline"); style = "font-size: 13px;" }
+                        +" $it"
+                    }
+                }
+            }
+            td {
+                style = "padding: 8px 4px; text-align: right; white-space: nowrap;"
+                if (latest == null) {
+                    span { style = "color: #80868b;"; +"No price yet" }
+                } else {
+                    span { style = "font-weight: 600; color: #202124;"; +formatMoney(latest.price) }
+                    if (latest.inStock == false) {
+                        span { style = "color: #c5221f; font-size: 12px;"; +" out of stock" }
+                    }
+                }
+            }
+            td {
+                style = "padding: 8px 4px; text-align: right; color: #80868b; font-size: 12px; white-space: nowrap;"
+                if (link.reader == VendorLinkReader.MANUAL) {
+                    span { style = chipStyle("#f1f3f4", "#5f6368"); +"entered by hand" }
+                } else {
+                    +(link.lastCheckedAt?.let { "checked ${formatDate(it)}" } ?: "never checked")
+                }
+            }
+            td {
+                style = "padding: 8px 4px; text-align: right; white-space: nowrap; width: 56px;"
+                if (link.reader == VendorLinkReader.MANUAL) {
+                    button {
+                        style = "background: none; border: none; cursor: pointer; color: #7627bb; padding: 2px;"
+                        attributes["title"] = "Log a price at ${link.vendor}"
+                        span { classes = setOf("mdi", "mdi-tag-plus-outline"); style = "font-size: 16px;" }
+                        onClickFunction = {
+                            logVendor = link.vendor
+                            logUrl = link.url
+                            editingObservation = null
+                            showLogForm = true
+                            render()
+                        }
+                    }
+                }
+                button {
+                    style = "background: none; border: none; cursor: pointer; color: #9aa0a6; padding: 2px;"
+                    attributes["title"] = "Stop tracking ${link.vendor}"
+                    span { classes = setOf("mdi", "mdi-link-variant-off"); style = "font-size: 16px;" }
+                    onClickFunction = { removeVendorLink(link) }
+                }
+            }
+        }
+    }
+
+    /**
+     * The candidate picker. Nothing is linked without being chosen here: the
+     * stores carry several editions of the same film under nearly identical
+     * titles, so the cover and price are what make the right one obvious.
+     */
+    private fun FlowContent.storeSearchPanel() {
+        div {
+            style = "margin-top: 14px; padding: 12px; background-color: #f8f9fa; border-radius: 6px;"
+            div {
+                style = "display: flex; gap: 8px; align-items: end;"
+                div {
+                    style = "flex: 1;"
+                    formLabel("Search the stores for")
+                    input(type = InputType.text) {
+                        id = "$DETAIL_ID-store-query"
+                        placeholder = "Release title"
+                        // Kept in state so a re-render after searching does not
+                        // throw away a query that was narrowed by hand.
+                        value = storeQuery ?: item.title ?: ""
+                        style = formInputStyle()
+                    }
+                }
+                button {
+                    style = primaryButtonStyle("#1a73e8") + " height: 40px;"
+                    disabled = isSearchingStores
+                    span {
+                        classes = setOf("mdi", if (isSearchingStores) "mdi-loading mdi-spin" else "mdi-magnify")
+                        style = "font-size: 16px;"
+                    }
+                    +if (isSearchingStores) "Searching..." else "Search"
+                    onClickFunction = {
+                        val query = (document.getElementById("$DETAIL_ID-store-query") as? HTMLInputElement)?.value
+                        searchStores(query)
+                    }
+                }
+            }
+
+            storeSearchMessage?.let {
+                div { style = "margin-top: 10px; font-size: 12px; color: #80868b;"; +it }
+            }
+
+            if (storeCandidates.isNotEmpty()) {
+                div {
+                    style = "margin-top: 12px; display: flex; flex-direction: column; gap: 8px; max-height: 320px; overflow-y: auto;"
+                    storeCandidates.forEach { candidate -> candidateRow(candidate) }
+                }
+            }
+        }
+    }
+
+    private fun FlowContent.candidateRow(candidate: VendorCandidate) {
+        val alreadyLinked = item.vendorLinks.any { it.url == candidate.url }
+        div {
+            style = "display: flex; gap: 10px; align-items: center; background-color: #ffffff; " +
+                "border: 1px solid #e8eaed; border-radius: 6px; padding: 8px 10px;"
+
+            div {
+                style = "width: 40px; height: 54px; flex-shrink: 0; background-color: #f1f3f4; border-radius: 4px; overflow: hidden; display: flex; align-items: center; justify-content: center;"
+                candidate.imageUrl?.let {
+                    img {
+                        src = it
+                        alt = candidate.title
+                        style = "max-width: 100%; max-height: 100%; object-fit: contain;"
+                        attributes["onerror"] = "this.style.display='none'"
+                    }
+                }
+            }
+
+            div {
+                style = "flex: 1; min-width: 0;"
+                div {
+                    style = "font-size: 13px; color: #202124; font-weight: 500; line-height: 1.35;"
+                    +candidate.title
+                }
+                div {
+                    style = "font-size: 12px; color: #5f6368; margin-top: 3px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;"
+                    span { +candidate.vendor }
+                    candidate.price?.let { span { style = "font-weight: 600; color: #202124;"; +formatMoney(it) } }
+                    candidate.listPrice?.let { span { style = "text-decoration: line-through;"; +formatMoney(it) } }
+                    if (candidate.inStock == false) span { style = "color: #c5221f;"; +"out of stock" }
+                }
+            }
+
+            if (alreadyLinked) {
+                span { style = chipStyle("#e6f4ea", "#188038"); +"Tracked" }
+            } else {
+                button {
+                    style = outlineButtonStyle("#188038")
+                    disabled = linkingUrl != null
+                    span {
+                        classes = setOf("mdi", if (linkingUrl == candidate.url) "mdi-loading mdi-spin" else "mdi-plus")
+                        style = "font-size: 16px;"
+                    }
+                    +if (linkingUrl == candidate.url) "Linking..." else "Track"
+                    onClickFunction = { linkCandidate(candidate) }
+                }
+            }
         }
     }
 
@@ -259,13 +573,14 @@ class WishlistItemDetailModal(
                 }
                 div {
                     style = "display: flex; gap: 8px;"
-                    if (!item.blurayComUrl.isNullOrBlank()) {
+                    // Nothing to check when the only sources are typed in.
+                    if (!item.blurayComUrl.isNullOrBlank() || item.vendorLinks.any { it.reader.isAutomatic }) {
                         button {
                             id = "$DETAIL_ID-refresh"
                             style = outlineButtonStyle("#1a73e8")
                             disabled = isRefreshing
                             span { classes = setOf("mdi", if (isRefreshing) "mdi-loading mdi-spin" else "mdi-refresh"); style = "font-size: 16px;" }
-                            +if (isRefreshing) "Checking..." else "Check blu-ray.com"
+                            +if (isRefreshing) "Checking..." else "Check prices"
                             onClickFunction = { refreshPrice() }
                         }
                     }
@@ -274,8 +589,13 @@ class WishlistItemDetailModal(
                         span { classes = setOf("mdi", "mdi-tag-plus-outline"); style = "font-size: 16px;" }
                         +"Log a price"
                         onClickFunction = {
-                            showLogForm = !showLogForm
-                            render()
+                            if (showLogForm) closeLogForm() else {
+                                showLogForm = true
+                                editingObservation = null
+                                logVendor = null
+                                logUrl = null
+                                render()
+                            }
                         }
                     }
                 }
@@ -283,7 +603,7 @@ class WishlistItemDetailModal(
 
             if (showLogForm) logPriceForm()
 
-            val selling = item.priceHistory.filter { it.source != PriceSource.BLURAY_LIST && it.source != PriceSource.USED_FROM }
+            val selling = item.priceHistory.filter { it.source in SELLING_PRICE_SOURCES }
             if (selling.size >= 2) {
                 div {
                     style = "margin: 14px 0 4px 0;"
@@ -294,8 +614,9 @@ class WishlistItemDetailModal(
             if (item.priceHistory.isEmpty()) {
                 div {
                     style = "padding: 16px 0 4px 0; color: #80868b; font-size: 13px;"
-                    +if (item.blurayComUrl.isNullOrBlank()) "No prices yet. Log one when you see it somewhere."
-                    else "No prices recorded yet. Check blu-ray.com or log one by hand."
+                    +if (item.blurayComUrl.isNullOrBlank() && item.vendorLinks.isEmpty())
+                        "No prices yet. Add a store by URL, or log a price when you see one somewhere."
+                    else "No prices recorded yet. Check prices or log one by hand."
                 }
             } else {
                 table {
@@ -316,8 +637,18 @@ class WishlistItemDetailModal(
                                 td { style = "padding: 6px 4px; color: #3c4043;"; +formatDate(obs.observedAt) }
                                 td {
                                     style = "padding: 6px 4px; color: #3c4043;"
-                                    +priceSourceLabel(obs.source)
-                                    obs.vendor?.let { +" · $it" }
+                                    +priceOriginLabel(obs)
+                                    if (obs.source == PriceSource.MANUAL) obs.vendor?.let { +" · $it" }
+                                    // Where it was seen, for the prices logged
+                                    // by hand against a page of their own.
+                                    obs.url?.takeIf { it.isNotBlank() }?.let { href ->
+                                        a(href = href, target = "_blank") {
+                                            style = "color: #1a73e8; text-decoration: none; margin-left: 4px;"
+                                            attributes["rel"] = "noopener"
+                                            attributes["title"] = href
+                                            span { classes = setOf("mdi", "mdi-open-in-new"); style = "font-size: 14px;" }
+                                        }
+                                    }
                                     obs.note?.let { span { style = "color: #80868b;"; +" — $it" } }
                                     if (obs.inStock == false) span { style = "color: #c5221f;"; +" (out of stock)" }
                                 }
@@ -326,7 +657,18 @@ class WishlistItemDetailModal(
                                     +formatMoney(obs.price)
                                 }
                                 td {
-                                    style = "padding: 6px 4px; text-align: right; width: 28px;"
+                                    style = "padding: 6px 4px; text-align: right; white-space: nowrap; width: 56px;"
+                                    // Only a price that was typed in can be
+                                    // corrected; a scraped one is a record of
+                                    // what a site said.
+                                    if (obs.source == PriceSource.MANUAL) {
+                                        button {
+                                            style = "background: none; border: none; cursor: pointer; color: #9aa0a6; padding: 2px;"
+                                            attributes["title"] = "Edit this price"
+                                            span { classes = setOf("mdi", "mdi-pencil-outline"); style = "font-size: 16px;" }
+                                            onClickFunction = { editObservation(obs) }
+                                        }
+                                    }
                                     button {
                                         style = "background: none; border: none; cursor: pointer; color: #9aa0a6; padding: 2px;"
                                         attributes["title"] = "Delete this observation"
@@ -342,42 +684,104 @@ class WishlistItemDetailModal(
         }
     }
 
+    /**
+     * The form for a price typed in by hand, used both to log a new one and to
+     * correct one already logged. The date a price was seen is not editable:
+     * it is when the sighting happened, not a field of it.
+     */
     private fun FlowContent.logPriceForm() {
+        val editing = editingObservation
+
         div {
-            style = "margin-top: 14px; padding: 12px; background-color: #f8f9fa; border-radius: 6px; display: grid; grid-template-columns: 1fr 1fr 2fr auto; gap: 8px; align-items: end;"
-            div {
-                formLabel("Price")
-                input(type = InputType.number) {
-                    id = "$DETAIL_ID-log-price"
-                    attributes["step"] = "0.01"
-                    attributes["min"] = "0"
-                    placeholder = "0.00"
-                    style = formInputStyle()
-                    attributes["autofocus"] = "true"
+            style = "margin-top: 14px; padding: 12px; background-color: #f8f9fa; border-radius: 6px;"
+            editing?.let {
+                div {
+                    style = "font-size: 12px; color: #5f6368; margin-bottom: 8px;"
+                    +"Editing the price logged ${formatDate(it.observedAt)}"
                 }
             }
             div {
-                formLabel("Where")
-                input(type = InputType.text) {
-                    id = "$DETAIL_ID-log-vendor"
-                    placeholder = "Store or site"
-                    style = formInputStyle()
+                style = "display: grid; grid-template-columns: 1fr 1fr 1.5fr 1.5fr auto; gap: 8px; align-items: end;"
+                div {
+                    formLabel("Price")
+                    input(type = InputType.number) {
+                        id = "$DETAIL_ID-log-price"
+                        attributes["step"] = "0.01"
+                        attributes["min"] = "0"
+                        placeholder = "0.00"
+                        style = formInputStyle()
+                        attributes["autofocus"] = "true"
+                        editing?.let { value = it.price.toString() }
+                    }
                 }
-            }
-            div {
-                formLabel("Note")
-                input(type = InputType.text) {
-                    id = "$DETAIL_ID-log-note"
-                    placeholder = "Sale ends Friday, used copy..."
-                    style = formInputStyle()
+                div {
+                    formLabel("Where")
+                    // Opened from a linked store, the price belongs to that
+                    // store's own series, so the name is not up for editing.
+                    storeSelect(
+                        idPrefix = "$DETAIL_ID-log-vendor",
+                        stores = storeOptions(logVendor ?: editing?.vendor),
+                        selected = editing?.vendor ?: logVendor,
+                        emptyLabel = "Store or site",
+                        locked = editing == null && logVendor != null
+                    )
                 }
-            }
-            button {
-                style = primaryButtonStyle("#7627bb") + " height: 40px;"
-                +"Save"
-                onClickFunction = { logPrice() }
+                div {
+                    formLabel("Link")
+                    input(type = InputType.text) {
+                        id = "$DETAIL_ID-log-url"
+                        placeholder = "https://..."
+                        style = formInputStyle()
+                        // Logging against a linked store starts from that
+                        // store's page, which is where the price was seen.
+                        (editing?.url ?: logUrl)?.let { value = it }
+                    }
+                }
+                div {
+                    formLabel("Note")
+                    input(type = InputType.text) {
+                        id = "$DETAIL_ID-log-note"
+                        placeholder = "Sale ends Friday, used copy..."
+                        style = formInputStyle()
+                        editing?.note?.let { value = it }
+                    }
+                }
+                div {
+                    style = "display: flex; gap: 8px;"
+                    button {
+                        style = primaryButtonStyle("#7627bb") + " height: 40px;"
+                        +if (editing == null) "Save" else "Save changes"
+                        onClickFunction = { logPrice() }
+                    }
+                    if (editing != null) {
+                        button {
+                            style = outlineButtonStyle() + " height: 40px;"
+                            +"Cancel"
+                            onClickFunction = { closeLogForm() }
+                        }
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * The stores to offer, with the item's own linked stores folded in so a
+     * price can be logged against one before the store list has loaded, and
+     * [extra] (the store the form was opened for) guaranteed to be there.
+     */
+    private fun storeOptions(extra: String? = null): List<String> =
+        (StoreOptions.names + item.vendorLinks.map { it.vendor } + listOfNotNull(extra))
+            .distinctBy { it.lowercase() }
+            .sortedBy { it.lowercase() }
+
+    /** Put the log form away, forgetting whatever it was opened for. */
+    private fun closeLogForm() {
+        showLogForm = false
+        editingObservation = null
+        logVendor = null
+        logUrl = null
+        render()
     }
 
     private fun FlowContent.actionsRow() {
@@ -445,7 +849,10 @@ class WishlistItemDetailModal(
                 val response = refreshWishlistItemPrice(item.id!!)
                 response.item?.let { item = it; onChanged(it) }
                 if (!response.success) {
-                    alertDialog.show(title = "Price check failed", message = response.error ?: "blu-ray.com could not be reached.")
+                    alertDialog.show(
+                        title = "Price check failed",
+                        message = response.error ?: "None of this item's price sources could be reached."
+                    )
                 }
             } catch (e: Exception) {
                 alertDialog.show(title = "Error", message = e.message ?: "Failed to refresh price.")
@@ -456,25 +863,163 @@ class WishlistItemDetailModal(
         }
     }
 
+    private fun searchStores(query: String?) {
+        if (isSearchingStores) return
+        isSearchingStores = true
+        searchedOnce = true
+        storeQuery = query?.trim()?.takeIf { it.isNotEmpty() }
+        render()
+        mainScope.launch {
+            try {
+                val response = searchVendorCandidates(item.id!!, query)
+                storeCandidates = response.candidates
+                storeSearchMessage = when {
+                    response.error != null -> response.error
+                    response.candidates.isEmpty() && response.storesSearched.isEmpty() ->
+                        "No stores are switched on for price tracking."
+                    response.candidates.isEmpty() ->
+                        "Nothing matching \"${response.query}\" at ${response.storesSearched.joinToString(", ")}."
+                    else -> buildString {
+                        append("${response.candidates.size} found at ${response.storesSearched.joinToString(", ")}")
+                        if (response.errors.isNotEmpty()) append(". Could not reach ${response.errors.joinToString("; ")}")
+                    }
+                }
+            } catch (e: Exception) {
+                storeCandidates = emptyList()
+                storeSearchMessage = e.message ?: "The store search failed."
+            } finally {
+                isSearchingStores = false
+                render()
+            }
+        }
+    }
+
+    private fun linkCandidate(candidate: VendorCandidate) {
+        if (linkingUrl != null) return
+        linkingUrl = candidate.url
+        render()
+        mainScope.launch {
+            try {
+                item = addWishlistVendorLink(item.id!!, candidate.url)
+                onChanged(item)
+            } catch (e: Exception) {
+                alertDialog.show(title = "Could not link that store", message = e.message ?: "Unknown error.")
+            } finally {
+                linkingUrl = null
+                render()
+            }
+        }
+    }
+
+    /**
+     * Track a URL the store search does not cover. What comes back says how it
+     * ended up being tracked, which is the one thing worth reporting: a page
+     * that could be read updates its price now, and one that could not is kept
+     * as a link to type prices against.
+     */
+    private fun addLinkByUrl() {
+        if (isAddingLink) return
+        val url = (document.getElementById("$DETAIL_ID-link-url") as? HTMLInputElement)?.value?.trim().orEmpty()
+        if (url.isEmpty()) {
+            alertDialog.show(title = "Enter a URL", message = "Paste the address of the product page you want to track.")
+            return
+        }
+        val vendor = readStoreSelection("$DETAIL_ID-link-vendor")
+        val price = (document.getElementById("$DETAIL_ID-link-price") as? HTMLInputElement)?.value
+            ?.trim()?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
+
+        val knownLinks = item.vendorLinks.mapNotNull { it.id }.toSet()
+        isAddingLink = true
+        addLinkMessage = null
+        render()
+        mainScope.launch {
+            try {
+                item = addWishlistVendorLink(item.id!!, url, vendor, price)
+                val added = item.vendorLinks.firstOrNull { it.id !in knownLinks }
+                    ?: item.vendorLinks.firstOrNull { it.url == url }
+                val latest = added?.let { item.priceHistory.latestFromVendor(it.vendor) }
+                addLinkMessage = when {
+                    added == null -> "Store added."
+                    added.reader == VendorLinkReader.MANUAL ->
+                        "Nothing readable on that page, so ${added.vendor} is kept as a link - log its price with the tag button."
+                    latest != null -> "Tracking ${added.vendor} at ${formatMoney(latest.price)}."
+                    else -> "Tracking ${added.vendor}, though the page is not quoting a price right now."
+                }
+                // The store may have named itself from the URL
+                added?.vendor?.takeIf { name -> StoreOptions.names.none { it.equals(name, true) } }
+                    ?.let { StoreOptions.reload() }
+                onChanged(item)
+            } catch (e: Exception) {
+                addLinkMessage = null
+                alertDialog.show(title = "Could not add that store", message = e.message ?: "Unknown error.")
+            } finally {
+                isAddingLink = false
+                render()
+            }
+        }
+    }
+
+    private fun removeVendorLink(link: VendorLink) {
+        val linkId = link.id ?: return
+        mainScope.launch {
+            try {
+                item = deleteWishlistVendorLink(item.id!!, linkId)
+                onChanged(item)
+                render()
+            } catch (e: Exception) {
+                alertDialog.show(title = "Error", message = e.message ?: "Failed to remove that store.")
+            }
+        }
+    }
+
     private fun logPrice() {
         val price = (document.getElementById("$DETAIL_ID-log-price") as? HTMLInputElement)?.value?.trim()?.toDoubleOrNull()
         if (price == null || price < 0) {
             alertDialog.show(title = "Enter a price", message = "The price must be a number of dollars, like 24.99.")
             return
         }
-        val vendor = (document.getElementById("$DETAIL_ID-log-vendor") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() }
+        val editing = editingObservation
+        val chosenVendor = readStoreSelection("$DETAIL_ID-log-vendor")
+        // The picker is locked to the store the form was opened for, so read
+        // that back rather than trusting a disabled select
+        val vendor = if (editing != null) chosenVendor else logVendor ?: chosenVendor
         val note = (document.getElementById("$DETAIL_ID-log-note") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() }
+        val url = (document.getElementById("$DETAIL_ID-log-url") as? HTMLInputElement)?.value?.trim()?.takeIf { it.isNotEmpty() }
+        if (url != null && !url.startsWith("http://", true) && !url.startsWith("https://", true)) {
+            alertDialog.show(title = "Check the link", message = "A link has to start with http:// or https://.")
+            return
+        }
 
+        val observation = PriceObservation(PriceSource.MANUAL, price, vendor = vendor, note = note, url = url)
         mainScope.launch {
             try {
-                item = addWishlistPriceObservation(item.id!!, PriceObservation(PriceSource.MANUAL, price, vendor = vendor, note = note))
-                showLogForm = false
+                item = when (val obsId = editing?.id) {
+                    null -> addWishlistPriceObservation(item.id!!, observation)
+                    else -> updateWishlistPriceObservation(item.id!!, obsId, observation)
+                }
+                // A store named for the first time here belongs in the picker
+                if (vendor != null && StoreOptions.names.none { it.equals(vendor, true) }) {
+                    StoreOptions.reload()
+                }
                 onChanged(item)
-                render()
+                closeLogForm()
             } catch (e: Exception) {
-                alertDialog.show(title = "Error", message = e.message ?: "Failed to log price.")
+                alertDialog.show(
+                    title = "Error",
+                    message = e.message ?: if (editing == null) "Failed to log price." else "Failed to update the price."
+                )
             }
         }
+    }
+
+    /** Open the log form on an already logged price, to correct it. */
+    private fun editObservation(obs: PriceObservation) {
+        if (obs.id == null) return
+        editingObservation = obs
+        logVendor = null
+        logUrl = null
+        showLogForm = true
+        render()
     }
 
     private fun deleteObservation(obs: PriceObservation) {

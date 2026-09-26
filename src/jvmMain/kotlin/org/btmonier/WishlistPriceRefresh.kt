@@ -88,7 +88,8 @@ class WishlistPriceRefreshCommand : CliktCommand(name = "refresh-wishlist-prices
 
         val dao = WishlistDao()
         val minAge = if (force) null else AppSettings.wishlistPriceMinAgeHours
-        val due = dao.itemsDueForRefresh(minAge, includeAll = all).let { if (limit != null) it.take(limit!!) else it }
+        val due = WishlistPriceService.firstItems(dao.itemsDueForRefresh(minAge, includeAll = all), limit)
+        val itemCount = due.map { it.itemId }.distinct().size
 
         if (due.isEmpty()) {
             echo("No wishlist items are due for a price check.")
@@ -96,24 +97,23 @@ class WishlistPriceRefreshCommand : CliktCommand(name = "refresh-wishlist-prices
         }
 
         if (dryRun) {
-            echo("${due.size} item(s) would be refreshed:")
-            due.forEach { (id, url) -> echo("  #$id  $url") }
+            echo("$itemCount item(s), ${due.size} page(s), would be refreshed:")
+            due.forEach { target -> echo("  #${target.itemId}  ${target.vendor ?: "blu-ray.com"}  ${target.url}") }
             return@runBlocking
         }
 
-        echo("Refreshing ${due.size} item(s)...")
+        echo("Refreshing $itemCount item(s) across ${due.size} page(s)...")
         val results = WishlistPriceService(dao).refreshDue(minAge, all, limit, onEach = { result ->
             val summary = when {
                 !result.succeeded -> "FAILED: ${result.error}"
                 result.observationsAdded == 0 -> "no change"
                 else -> "${result.observationsAdded} new price(s)" +
-                    (result.prices?.amazonPrice?.let { " - Amazon \$$it" } ?: "") +
-                    (result.prices?.newFromPrice?.let { " - new from \$$it" } ?: "")
+                    (result.reportedPrice?.let { " - \$$it" } ?: "")
             }
-            echo("  #${result.itemId}  $summary")
+            echo("  #${result.itemId}  ${result.sourceLabel}  $summary")
         })
 
-        echo("Done: ${results.count { it.succeeded }} refreshed, ${results.count { !it.succeeded }} failed, " +
+        echo("Done: ${results.count { it.succeeded }} checked, ${results.count { !it.succeeded }} failed, " +
             "${results.sumOf { it.observationsAdded }} price change(s) recorded.")
     }
 }

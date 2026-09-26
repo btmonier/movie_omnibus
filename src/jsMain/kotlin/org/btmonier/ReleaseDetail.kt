@@ -40,6 +40,8 @@ class ReleaseDetail(
             try {
                 release = fetchRelease(releaseId)
                 defaultTaxRate = runCatching { fetchSettings().defaultTaxRate }.getOrDefault(DEFAULT_TAX_RATE)
+                // The purchase panel's store picker renders synchronously
+                StoreOptions.ensureLoaded()
             } catch (e: Exception) {
                 alertDialog.show(title = "Error", message = "Failed to load release: ${e.message}")
                 onBack()

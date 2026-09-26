@@ -1,9 +1,11 @@
 package org.btmonier
 
-import kotlinx.html.FlowContent
-import kotlinx.html.label
-import kotlinx.html.span
-import kotlinx.html.style
+import kotlinx.browser.document
+import kotlinx.html.*
+import kotlinx.html.js.onChangeFunction
+import org.w3c.dom.HTMLElement
+import org.w3c.dom.HTMLInputElement
+import org.w3c.dom.HTMLSelectElement
 import kotlin.js.Date
 import kotlin.math.abs
 import kotlin.math.roundToLong
@@ -96,6 +98,16 @@ fun priceSourceLabel(source: PriceSource): String = when (source) {
     PriceSource.NEW_FROM -> "New from"
     PriceSource.USED_FROM -> "Used from"
     PriceSource.MANUAL -> "Logged"
+    PriceSource.VENDOR -> "Store"
+}
+
+/**
+ * Where a price came from, in as few words as say it: the store's own name
+ * when a store reported it, otherwise the kind of source.
+ */
+fun priceOriginLabel(observation: PriceObservation): String = when (observation.source) {
+    PriceSource.VENDOR -> observation.vendor?.takeIf { it.isNotBlank() } ?: "Store"
+    else -> priceSourceLabel(observation.source)
 }
 
 fun FlowContent.statusChip(status: WishlistStatus) {
@@ -120,6 +132,80 @@ fun FlowContent.tagChip(tag: String) {
         style = chipStyle("#f3e8fd", "#7627bb")
         +tag
     }
+}
+
+/** The value the store picker uses for "a shop not on the list yet". */
+private const val STORE_OTHER = "__other__"
+
+/**
+ * Pick a store from the ones already recorded, or name a new one. The shops
+ * bought from are few and repeat, so typing the name every time is how
+ * "Amazon", "amazon" and "Amazon.com" become three stores; "Other..." is what
+ * keeps a genuinely new shop addable.
+ *
+ * Renders a select at `$idPrefix-select` and the text fallback at
+ * `$idPrefix-other`. Read both back with [readStoreSelection].
+ */
+fun FlowContent.storeSelect(
+    idPrefix: String,
+    stores: List<String>,
+    selected: String? = null,
+    emptyLabel: String = "Choose a store",
+    locked: Boolean = false
+) {
+    // A name that is not in the list yet (a store since renamed, or a price
+    // logged before this picker existed) starts the form off in "Other..."
+    val isKnown = selected != null && stores.any { it.equals(selected, ignoreCase = true) }
+    val startsOther = selected != null && !isKnown
+
+    select {
+        id = "$idPrefix-select"
+        style = formInputStyle()
+        disabled = locked
+        onChangeFunction = { event ->
+            val chose = (event.target as HTMLSelectElement).value == STORE_OTHER
+            (document.getElementById("$idPrefix-other") as? HTMLElement)?.style?.display =
+                if (chose) "block" else "none"
+            if (chose) (document.getElementById("$idPrefix-other") as? HTMLInputElement)?.focus()
+        }
+
+        option {
+            value = ""
+            this.selected = selected == null
+            +emptyLabel
+        }
+        stores.forEach { store ->
+            option {
+                value = store
+                this.selected = isKnown && store.equals(selected, ignoreCase = true)
+                +store
+            }
+        }
+        option {
+            value = STORE_OTHER
+            this.selected = startsOther
+            +"Other..."
+        }
+    }
+
+    input(type = InputType.text) {
+        id = "$idPrefix-other"
+        placeholder = "Name of the store"
+        style = formInputStyle() + " margin-top: 6px; display: ${if (startsOther) "block" else "none"};"
+        if (startsOther) value = selected!!
+    }
+}
+
+/**
+ * The store named by a [storeSelect], or null when none was chosen. A blank
+ * "Other..." reads as no choice rather than as an empty store name.
+ */
+fun readStoreSelection(idPrefix: String): String? {
+    val chosen = (document.getElementById("$idPrefix-select") as? HTMLSelectElement)?.value.orEmpty()
+    if (chosen.isEmpty()) return null
+    if (chosen != STORE_OTHER) return chosen
+    return (document.getElementById("$idPrefix-other") as? HTMLInputElement)
+        ?.value?.trim()?.takeIf { it.isNotEmpty() }
 }
 
 fun FlowContent.formLabel(text: String, forId: String? = null) {

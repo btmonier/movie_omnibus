@@ -90,6 +90,7 @@ object DatabaseFactory {
                 Distributors,
                 Themes,
                 Countries,
+                Stores,
                 MovieGenres,
                 MovieSubgenres,
                 MovieCollections,
@@ -107,6 +108,7 @@ object DatabaseFactory {
                 WishlistItemImages,
                 WishlistItemMovies,
                 WishlistPriceHistory,
+                WishlistItemVendorLinks,
                 WishlistTags,
                 WishlistItemTags,
                 Purchases

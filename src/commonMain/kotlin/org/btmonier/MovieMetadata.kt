@@ -192,6 +192,18 @@ enum class WishlistStatus {
     }
 }
 
+/**
+ * The order statuses are shown in, as opposed to the order they happen in.
+ * Anything already paid for is what you want to see first, so ordered and
+ * shipped items sit above the things still only wanted.
+ */
+val WISHLIST_STATUS_DISPLAY_ORDER: List<WishlistStatus> = listOf(
+    WishlistStatus.ORDERED,
+    WishlistStatus.SHIPPED,
+    WishlistStatus.WISHLIST,
+    WishlistStatus.OWNED
+)
+
 @Serializable
 enum class WishlistPriority {
     HIGH,
@@ -203,6 +215,10 @@ enum class WishlistPriority {
  * Where a price observation came from. The blu-ray.com list price is the MSRP
  * and is kept apart from the sources that reflect what the item actually sells
  * for.
+ *
+ * [VENDOR] covers every store scraped directly rather than through
+ * blu-ray.com; which store is named in [PriceObservation.vendor], so one item
+ * carries an independent price series per store.
  */
 @Serializable
 enum class PriceSource {
@@ -210,7 +226,8 @@ enum class PriceSource {
     AMAZON,
     NEW_FROM,
     USED_FROM,
-    MANUAL
+    MANUAL,
+    VENDOR
 }
 
 /**
@@ -234,16 +251,73 @@ data class BluRayPrices(
 
 /**
  * One price seen for a wishlist item at one point in time.
+ *
+ * [url] is where it was seen, kept for the prices logged by hand: a sale page,
+ * an eBay listing, a shop with no reader of its own. Scraped observations
+ * leave it null, since their page is on the vendor link already.
  */
 @Serializable
 data class PriceObservation(
     val source: PriceSource,
     val price: Double,
-    val vendor: String? = null,  // Store name for MANUAL observations
+    val vendor: String? = null,  // Store name for MANUAL and VENDOR observations
     val inStock: Boolean? = null,
     val observedAt: String? = null,  // ISO datetime, auto-set on insert
     val note: String? = null,
+    val url: String? = null,
     val id: Int? = null
+)
+
+/**
+ * Which code, if any, can read the price off a tracked page.
+ *
+ * [STORE] is one of the stores with a reader of its own. [SHOPIFY] and
+ * [STRUCTURED] are sites recognized when the link was added - a Shopify
+ * storefront nobody has registered, or any page publishing a price in JSON-LD
+ * or Open Graph tags. [MANUAL] is a page nothing could read, kept as a
+ * click-through whose prices are typed in by hand.
+ */
+@Serializable
+enum class VendorLinkReader {
+    STORE,
+    SHOPIFY,
+    STRUCTURED,
+    MANUAL;
+
+    /** True when a refresh pass can re-check this link on its own. */
+    val isAutomatic: Boolean get() = this != MANUAL
+}
+
+/**
+ * A store product page a wishlist item is tracked on, confirmed once by hand
+ * and re-checked on every refresh afterwards. [lastError] holds why the most
+ * recent check failed, so a store that has dropped the product or started
+ * refusing requests says so instead of going quiet.
+ */
+@Serializable
+data class VendorLink(
+    val vendor: String,
+    val url: String,
+    val reader: VendorLinkReader = VendorLinkReader.STORE,
+    val lastCheckedAt: String? = null,  // ISO datetime
+    val lastError: String? = null,
+    val id: Int? = null
+)
+
+/**
+ * A candidate store product offered by the "find on other stores" search, for
+ * the user to confirm before it becomes a [VendorLink]. Carries the cover and
+ * price so a steelbook is distinguishable from a standard edition at a glance.
+ */
+@Serializable
+data class VendorCandidate(
+    val vendor: String,
+    val title: String,
+    val url: String,
+    val price: Double? = null,
+    val listPrice: Double? = null,
+    val imageUrl: String? = null,
+    val inStock: Boolean? = null
 )
 
 /**
@@ -359,6 +433,7 @@ data class WishlistItem(
     val notes: String? = null,
     val tags: List<String> = emptyList(),
     val linkedMovies: List<WishlistMovie> = emptyList(),
+    val vendorLinks: List<VendorLink> = emptyList(),
     val currentPrice: Double? = null,
     val currentPriceSource: PriceSource? = null,
     val previousPrice: Double? = null,
@@ -442,6 +517,15 @@ fun releaseDateBucket(releaseDate: String?, today: String): String {
 
 /** Display order for [releaseDateBucket] groups. */
 val RELEASE_BUCKET_ORDER: List<String> = listOf("Out this month", "Pre-order", "Available", "Unknown date")
+
+/**
+ * True when the release date is still ahead, covering both the "Pre-order" and
+ * "Out this month" buckets: anything not out yet is something that cannot be
+ * had now, whichever month it lands in. An item with no release date is not
+ * treated as a pre-order - most hand-entered items have none.
+ */
+fun isPreorder(releaseDate: String?, today: String): Boolean =
+    releaseDate?.takeIf { it.length >= 10 }?.let { it > today } ?: false
 
 /**
  * Data class for watched entries

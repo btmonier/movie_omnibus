@@ -64,6 +64,15 @@ object Themes : IntIdTable("themes") {
 }
 
 /**
+ * Global stores table - master list of every shop a price was seen at or a
+ * purchase was made from. Managed like any other category, so a store spelled
+ * two ways can be merged and corrected on every price and purchase at once.
+ */
+object Stores : IntIdTable("stores") {
+    val name = varchar("name", 200).uniqueIndex()
+}
+
+/**
  * Global countries table - master list of all available countries
  */
 object Countries : IntIdTable("countries") {
@@ -251,11 +260,32 @@ object WishlistItemMovies : IntIdTable("wishlist_item_movies") {
 object WishlistPriceHistory : IntIdTable("wishlist_price_history") {
     val itemId = reference("item_id", WishlistItems)
     val priceSource = varchar("source", 20) // BLURAY_LIST, AMAZON, NEW_FROM, USED_FROM, MANUAL
-    val vendor = varchar("vendor", 200).nullable()
+    // Null for the item's own blu-ray.com page, which is not a store
+    val storeId = optReference("store_id", Stores)
     val price = decimal("price", 10, 2)
     val inStock = bool("in_stock").nullable()
     val observedAt = datetime("observed_at").defaultExpression(CurrentDateTime)
     val note = text("note").nullable()
+    // Where a hand-logged price was seen, so the history can link back to it
+    val url = text("url").nullable()
+}
+
+/**
+ * Store product pages a wishlist item is tracked on, beyond its blu-ray.com
+ * page. One row per store, confirmed once by hand through the vendor search or
+ * by pasting a URL, so an item is never auto-linked to the wrong edition.
+ *
+ * [reader] records which code can read the page, decided when the link was
+ * added; null means one of the registered stores, which is what every row
+ * predating hand-added links is.
+ */
+object WishlistItemVendorLinks : IntIdTable("wishlist_item_vendor_links") {
+    val itemId = reference("item_id", WishlistItems)
+    val storeId = reference("store_id", Stores)
+    val url = text("url")
+    val reader = varchar("reader", 20).nullable()
+    val lastCheckedAt = datetime("last_checked_at").nullable()
+    val lastError = text("last_error").nullable()
 }
 
 /**
@@ -282,7 +312,7 @@ object WishlistItemTags : IntIdTable("wishlist_item_tags") {
 object Purchases : IntIdTable("purchases") {
     val wishlistItemId = optReference("wishlist_item_id", WishlistItems)
     val releaseId = optReference("release_id", Releases).uniqueIndex()
-    val vendor = varchar("vendor", 200).nullable()
+    val storeId = optReference("store_id", Stores)
     val orderDate = date("order_date").nullable()
     val orderNumber = varchar("order_number", 100).nullable()
     val trackingUrl = text("tracking_url").nullable()

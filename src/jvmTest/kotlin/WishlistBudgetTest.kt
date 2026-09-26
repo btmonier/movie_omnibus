@@ -104,4 +104,53 @@ class WishlistBudgetTest {
         assertTrue(pickWithinBudget(emptyList(), count = 3, budget = 100.0).picks.isEmpty())
         assertFalse(pickWithinBudget(shelf, count = 0, budget = 100.0).isComplete)
     }
+
+    @Test
+    fun `fill-budget mode spends within the budget and ignores item count`() {
+        repeat(50) { seed ->
+            val result = pickWithinBudget(shelf, count = null, budget = 80.0, random = Random(seed))
+            assertNull(result.requestedCount)
+            assertTrue(result.picks.isNotEmpty(), "Seed $seed produced no picks")
+            assertTrue(result.isComplete, "Seed $seed was incomplete")
+            assertTrue(result.total <= 80.0, "Seed $seed spent ${result.total}")
+            assertTrue(result.total > 44.99, "Seed $seed left too much budget unused")
+            assertEquals(result.picks.map { it.id }.toSet().size, result.picks.size, "Seed $seed repeated an item")
+        }
+    }
+
+    @Test
+    fun `fill-budget mode reports the cheapest price when the budget is too small`() {
+        val result = pickWithinBudget(shelf, count = null, budget = 10.0, random = Random(1))
+        assertTrue(result.picks.isEmpty())
+        assertFalse(result.isComplete)
+        assertEquals(12.25, assertNotNull(result.minimumBudgetForCount))
+    }
+
+    @Test
+    fun `skipping pre-orders keeps unreleased items out of the roll`() {
+        val today = "2026-09-05"
+        val unreleased = listOf(
+            WishlistItem(title = "Out next month", currentPrice = 24.99, releaseDate = "2026-10-20", id = 101),
+            WishlistItem(title = "Out later this month", currentPrice = 29.99, releaseDate = "2026-09-28", id = 102)
+        )
+        val available = shelf + unreleased
+
+        // With pre-orders included, everything priced is fair game
+        val everything = pickWithinBudget(available, count = null, budget = 500.0, random = Random(5))
+        assertEquals(available.size, everything.eligibleCount)
+
+        // The page filters before rolling, the way budgetCandidates() does
+        val outNow = available.filterNot { isPreorder(it.releaseDate, today) }
+        val result = pickWithinBudget(outNow, count = null, budget = 500.0, random = Random(5))
+        assertEquals(shelf.size, result.eligibleCount)
+        assertTrue(result.picks.none { it.id in setOf(101, 102) }, "A pre-order was picked")
+    }
+
+    @Test
+    fun `fill-budget mode is repeatable for the same seed`() {
+        val first = pickWithinBudget(shelf, count = null, budget = 80.0, random = Random(11))
+        val again = pickWithinBudget(shelf, count = null, budget = 80.0, random = Random(11))
+        assertEquals(first.picks.map { it.title }, again.picks.map { it.title })
+        assertEquals(first.total, again.total)
+    }
 }

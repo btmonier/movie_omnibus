@@ -22,7 +22,11 @@ object SchemaMigration {
     // release migration reads both columns off the legacy table.
     private val additiveColumns = listOf(
         AdditiveColumn("physical_media", "alternate_title", "varchar(500)"),
-        AdditiveColumn("physical_media", "is_collection", "boolean")
+        AdditiveColumn("physical_media", "is_collection", "boolean"),
+        // Null on the rows that predate hand-added links, which is read as
+        // "one of the registered stores" - true of every one of them.
+        AdditiveColumn("wishlist_item_vendor_links", "reader", "varchar(20)"),
+        AdditiveColumn("wishlist_price_history", "url", "text")
     )
 
     fun addMissingColumns(database: Database? = null) {

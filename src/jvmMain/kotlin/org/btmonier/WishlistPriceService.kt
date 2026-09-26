@@ -1,6 +1,5 @@
 package org.btmonier
 
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -9,69 +8,153 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
-import kotlinx.coroutines.withContext
+import org.btmonier.database.RefreshTarget
 import org.btmonier.database.WishlistDao
-import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import kotlin.random.Random
 
 /**
- * Outcome of refreshing one item's price from blu-ray.com.
+ * Outcome of re-checking one price source for one item. [vendor] names the
+ * store, or is null when the source was the item's blu-ray.com page.
  */
 data class PriceRefreshResult(
     val itemId: Int,
     val url: String,
+    val vendor: String? = null,
     val prices: BluRayPrices? = null,
+    val vendorPrice: VendorPrice? = null,
     val observationsAdded: Int = 0,
     val error: String? = null
 ) {
     val succeeded: Boolean get() = error == null
+
+    /** What to call this source in a message. */
+    val sourceLabel: String get() = vendor ?: "blu-ray.com"
+
+    /** The price this source reported, whichever kind of source it was. */
+    val reportedPrice: Double?
+        get() = vendorPrice?.price ?: prices?.let { it.amazonPrice ?: it.newFromPrice }
 }
 
 /**
- * Fetches blu-ray.com release pages and records what they say about price.
- * Shared by the import endpoint, the manual refresh endpoints, the background
- * refresher and the `refreshWishlistPrices` CLI so they all behave the same.
+ * Candidate store products for one search, with the stores that answered and
+ * the ones that did not, so a store being down is visible rather than looking
+ * like "no results".
  */
-class WishlistPriceService(private val wishlistDao: WishlistDao) {
+data class VendorSearchOutcome(
+    val candidates: List<VendorCandidate> = emptyList(),
+    val storesSearched: List<String> = emptyList(),
+    val errors: List<String> = emptyList()
+)
+
+/**
+ * Fetches the pages a wishlist item is tracked on and records what they say
+ * about price. Shared by the import endpoint, the manual refresh endpoints, the
+ * background refresher and the `refreshWishlistPrices` CLI so they all behave
+ * the same.
+ *
+ * Which reader a page belongs to is decided by [PriceScrapers], so adding a
+ * store does not touch this class.
+ */
+class WishlistPriceService(
+    private val wishlistDao: WishlistDao,
+    private val fetcher: PageFetcher = JsoupPageFetcher
+) {
 
     /**
-     * Download a blu-ray.com release page. Runs on the IO dispatcher because
-     * JSoup blocks.
+     * Download an HTML page. Used by the import endpoint, which needs the whole
+     * blu-ray.com document rather than just its prices.
      */
-    suspend fun fetchDocument(url: String): Document = withContext(Dispatchers.IO) {
-        Jsoup.connect(url)
-            .userAgent(USER_AGENT)
-            .timeout(15_000)
-            .get()
-    }
+    suspend fun fetchDocument(url: String): Document = fetcher.document(url)
 
     /**
-     * Re-scrape one item's page and record any changed prices.
+     * Work out whether a hand-added URL can be read, and read it if it can.
+     * Used when a link is created, so the item shows a price straight away and
+     * the way to re-read it is settled once rather than guessed every pass.
      */
-    suspend fun refreshItem(itemId: Int, url: String): PriceRefreshResult {
-        if (!BluRayComUtils.isBluRayComUrl(url)) {
-            return PriceRefreshResult(itemId, url, error = "Not a blu-ray.com release URL")
-        }
+    suspend fun probeLink(url: String, vendorName: String): PriceProbe =
+        PriceScrapers.probe(url, vendorName, fetcher)
+
+    /**
+     * Re-check one source and record any changed price. A failure is recorded
+     * against the vendor link so the item can show which store went quiet.
+     */
+    suspend fun refresh(target: RefreshTarget): PriceRefreshResult {
+        val scraper = PriceScrapers.forLink(target.url, target.vendor, target.reader, fetcher)
+            ?: return PriceRefreshResult(
+                target.itemId, target.url, target.vendor,
+                error = "No price source recognizes ${hostOf(target.url)}"
+            )
+
         return try {
-            val doc = fetchDocument(url)
-            val prices = BluRayComUtils.extractPrices(doc)
-            val added = wishlistDao.recordScrapedPrices(itemId, prices)
-            if (added < 0) {
-                PriceRefreshResult(itemId, url, prices, error = "Wishlist item no longer exists")
-            } else {
-                PriceRefreshResult(itemId, url, prices, observationsAdded = added)
+            when (val scraped = scraper.fetch(target.url)) {
+                is ScrapedPrices.BluRay -> {
+                    val added = wishlistDao.recordScrapedPrices(target.itemId, scraped.prices)
+                    if (added < 0) missingItem(target)
+                    else PriceRefreshResult(
+                        target.itemId, target.url, target.vendor,
+                        prices = scraped.prices, observationsAdded = added
+                    )
+                }
+                is ScrapedPrices.Vendor -> {
+                    val vendorName = target.vendor ?: scraped.vendor
+                    val added = wishlistDao.recordVendorPrice(target.itemId, vendorName, scraped.prices)
+                    if (added < 0) missingItem(target)
+                    else PriceRefreshResult(
+                        target.itemId, target.url, vendorName,
+                        vendorPrice = scraped.prices, observationsAdded = added
+                    )
+                }
             }
         } catch (e: Exception) {
-            PriceRefreshResult(itemId, url, error = e.message ?: e::class.simpleName)
+            val message = e.message?.takeIf { it.isNotBlank() } ?: e::class.simpleName ?: "Unknown error"
+            target.vendor?.let { wishlistDao.recordVendorError(target.itemId, it, message) }
+            PriceRefreshResult(target.itemId, target.url, target.vendor, error = message)
         }
     }
 
+    /** Re-check every source one item is tracked on. */
+    suspend fun refreshAllSources(itemId: Int): List<PriceRefreshResult> =
+        wishlistDao.refreshTargetsFor(itemId).map { refresh(it) }
+
     /**
-     * Refresh every item that is due, at most [concurrency] pages at a time and
-     * with the starts spread out, so blu-ray.com sees a trickle rather than a
-     * burst. [minAgeHours] of null refreshes regardless of when an item was
-     * last checked.
+     * Look for [query] at every searchable store at once, cheapest first. The
+     * results are candidates for the user to confirm, never links applied
+     * automatically: stores carry several editions of the same film under
+     * near-identical titles, so picking one by similarity would track the wrong
+     * disc about as often as the right one.
+     */
+    suspend fun searchStores(
+        query: String,
+        limit: Int = DEFAULT_VENDOR_SEARCH_LIMIT
+    ): VendorSearchOutcome = coroutineScope {
+        val stores = PriceScrapers.searchable()
+        if (stores.isEmpty()) return@coroutineScope VendorSearchOutcome()
+
+        val outcomes = stores.map { store ->
+            async {
+                store.vendorName to runCatching { store.search(query, limit) }
+            }
+        }.awaitAll()
+
+        VendorSearchOutcome(
+            candidates = outcomes
+                .flatMap { (_, result) -> result.getOrDefault(emptyList()) }
+                .sortedWith(compareBy(nullsLast()) { it.price }),
+            storesSearched = outcomes.filter { (_, result) -> result.isSuccess }.map { (name, _) -> name },
+            errors = outcomes.mapNotNull { (name, result) ->
+                result.exceptionOrNull()?.let { "$name: ${it.message ?: it::class.simpleName}" }
+            }
+        )
+    }
+
+    /**
+     * Refresh every source that is due, at most [concurrency] pages per site at
+     * a time and with the starts spread out, so no one site sees a burst. The
+     * gate is per site, so several stores are checked in parallel while each
+     * individually stays polite. [minAgeHours] of null refreshes regardless of
+     * when an item was last checked, and [limit] counts items rather than
+     * sources.
      */
     suspend fun refreshDue(
         minAgeHours: Double? = null,
@@ -80,26 +163,38 @@ class WishlistPriceService(private val wishlistDao: WishlistDao) {
         concurrency: Int = AppSettings.wishlistPriceConcurrency,
         onEach: suspend (PriceRefreshResult) -> Unit = {}
     ): List<PriceRefreshResult> = coroutineScope {
-        val due = wishlistDao.itemsDueForRefresh(minAgeHours, includeAll)
-            .let { if (limit != null) it.take(limit) else it }
-
-        val gate = Semaphore(concurrency.coerceAtLeast(1))
+        val due = firstItems(wishlistDao.itemsDueForRefresh(minAgeHours, includeAll), limit)
+        val permits = concurrency.coerceAtLeast(1)
         val reporting = Mutex()
 
-        due.mapIndexed { index, (id, url) ->
-            async {
-                gate.withPermit {
-                    // Stagger the starts so the first batch does not all land at once
-                    if (index > 0) delay(Random.nextLong(200, 700))
-                    val result = refreshItem(id, url)
-                    reporting.withLock { onEach(result) }
-                    result
+        due.groupBy { hostOf(it.url) }.map { (_, targets) ->
+            val gate = Semaphore(permits)
+            targets.mapIndexed { index, target ->
+                async {
+                    gate.withPermit {
+                        // Stagger the starts so the first batch does not all land at once
+                        if (index > 0) delay(Random.nextLong(200, 700))
+                        val result = refresh(target)
+                        reporting.withLock { onEach(result) }
+                        result
+                    }
                 }
             }
-        }.awaitAll()
+        }.flatten().awaitAll()
     }
 
+    private fun missingItem(target: RefreshTarget) =
+        PriceRefreshResult(target.itemId, target.url, target.vendor, error = "Wishlist item no longer exists")
+
     companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        /**
+         * The targets belonging to the first [limit] items, keeping every source
+         * of an item together so "refresh 5 items" never checks half of one.
+         */
+        internal fun firstItems(targets: List<RefreshTarget>, limit: Int?): List<RefreshTarget> {
+            if (limit == null) return targets
+            val keep = targets.map { it.itemId }.distinct().take(limit).toSet()
+            return targets.filter { it.itemId in keep }
+        }
     }
 }

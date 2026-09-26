@@ -2,15 +2,18 @@ package org.btmonier.database
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.main
+import org.btmonier.PriceScrapers
+import org.btmonier.SHOPIFY_STORES
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Transaction
 import org.jetbrains.exposed.sql.transactions.transaction
 
 /**
  * Converts the categorical columns that used to hold a raw string on every row
- * (movie_themes.theme, movie_countries.country, physical_media.distributor) into
- * foreign keys pointing at lookup tables, so each value has a single primary
- * source that can be renamed in one place.
+ * (movie_themes.theme, movie_countries.country, physical_media.distributor, and
+ * the vendor names on wishlist links, price history and purchases) into foreign
+ * keys pointing at lookup tables, so each value has a single primary source that
+ * can be renamed in one place.
  *
  * Each step is guarded on the presence of the legacy column, so running this
  * against an already migrated database does nothing. SchemaUtils.create never
@@ -40,7 +43,13 @@ object CategoryMigration {
     private val legacyColumns = listOf(
         LegacyColumn("movie_themes", "theme", "themes", "theme_id", "movie_id", nullable = false),
         LegacyColumn("movie_countries", "country", "countries", "country_id", "movie_id", nullable = false),
-        LegacyColumn("physical_media", "distributor", "distributors", "distributor_id", null, nullable = true)
+        LegacyColumn("physical_media", "distributor", "distributors", "distributor_id", null, nullable = true),
+        // A store is one price series, so an item holds at most one link per
+        // store and the pairs are deduped when two spellings collapse
+        LegacyColumn("wishlist_item_vendor_links", "vendor", "stores", "store_id", "item_id", nullable = false),
+        // Left nullable: the item's own blu-ray.com prices name no store
+        LegacyColumn("wishlist_price_history", "vendor", "stores", "store_id", null, nullable = true),
+        LegacyColumn("purchases", "vendor", "stores", "store_id", null, nullable = true)
     )
 
     /**
@@ -48,7 +57,35 @@ object CategoryMigration {
      */
     fun migrateCategoriesToLookupTables(database: Database? = null) {
         transaction(database) {
+            seedRegisteredStores()
             legacyColumns.forEach { migrate(it) }
+        }
+    }
+
+    /**
+     * Put the stores the price readers know about into the lookup table, so
+     * they can be picked before anything has been linked to them, and so their
+     * canonical spelling is the one the legacy vendor strings collapse onto.
+     */
+    private fun Transaction.seedRegisteredStores() {
+        if (!tableExists("stores")) return
+
+        val names = buildList {
+            add(PriceScrapers.bluRay.vendorName)
+            addAll(SHOPIFY_STORES.map { it.vendorName })
+        }
+
+        names.forEach { name ->
+            val escaped = name.replace("'", "''")
+            exec(
+                """
+                INSERT INTO stores (name)
+                SELECT '$escaped'
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM stores WHERE lower(name) = lower('$escaped')
+                )
+                """.trimIndent()
+            )
         }
     }
 
@@ -65,7 +102,7 @@ object CategoryMigration {
      * Row counts of every lookup table, for reporting.
      */
     fun lookupTableCounts(database: Database? = null): Map<String, Int> = transaction(database) {
-        listOf("genres", "subgenres", "collections", "distributors", "themes", "countries")
+        listOf("genres", "subgenres", "collections", "distributors", "themes", "countries", "wishlist_tags", "stores")
             .associateWith { table -> selectInt("SELECT count(*) FROM $table") }
     }
 
@@ -181,6 +218,10 @@ object CategoryMigration {
                 println("  collapsing ${losers.joinToString(", ") { "\"$it\"" }} into \"$winner\"")
             }
     }
+
+    private fun Transaction.tableExists(table: String): Boolean = selectInt(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = '$table'"
+    ) > 0
 
     private fun Transaction.columnExists(table: String, column: String): Boolean = selectInt(
         """

@@ -129,12 +129,12 @@ class PurchaseFormFields(
             style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;"
 
             field("Vendor") {
-                input(type = InputType.text) {
-                    id = id("vendor")
-                    value = initial?.vendor ?: ""
-                    placeholder = "Amazon, Criterion, local shop..."
-                    style = formInputStyle()
-                }
+                storeSelect(
+                    idPrefix = id("vendor"),
+                    stores = StoreOptions.names,
+                    selected = initial?.vendor,
+                    emptyLabel = "Amazon, Criterion, local shop..."
+                )
             }
             field("Order date") {
                 input(type = InputType.date) {
@@ -243,7 +243,7 @@ class PurchaseFormFields(
             taxRate = rate,
             taxAmount = if (taxAmountEdited) taxAmount else null,
             shipping = numberValue(id("shipping")) ?: 0.0,
-            vendor = textValue(id("vendor")).takeIf { it.isNotBlank() },
+            vendor = readStoreSelection(id("vendor")),
             orderDate = textValue(id("order-date")).takeIf { it.isNotBlank() },
             orderNumber = textValue(id("order-number")).takeIf { it.isNotBlank() },
             trackingUrl = textValue(id("tracking-url")).takeIf { it.isNotBlank() },

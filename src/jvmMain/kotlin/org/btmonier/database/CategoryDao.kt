@@ -17,7 +17,8 @@ enum class CategoryType(val slug: String, val label: String) {
     DISTRIBUTOR("distributors", "Distributors"),
     THEME("themes", "Themes"),
     COUNTRY("countries", "Countries"),
-    WISHLIST_TAG("wishlist-tags", "Wishlist Tags");
+    WISHLIST_TAG("wishlist-tags", "Wishlist Tags"),
+    STORE("stores", "Stores");
 
     companion object {
         fun fromSlug(slug: String): CategoryType? =
@@ -54,64 +55,97 @@ sealed interface RenameOutcome {
 class CategoryDao {
 
     /**
-     * Maps a category to its lookup table and to the rows that reference it.
+     * One set of rows that reference a category entry.
+     *
+     * The referencing side is addressed by name because the category types
+     * disagree on nullability, and the operations there only ever interpolate
+     * integer ids.
+     *
+     * @param ownerColumn Column identifying the entity that uses the entry.
+     * @param isOptional True when the reference can be nulled out instead of
+     *   deleting the referencing row (a release outlives its distributor).
+     * @param isUnique True when (owner, entry) pairs must stay unique, which
+     *   requires dropping duplicates after a merge.
+     * @param counts Whether these rows are what the entry's usage count reports.
+     *   Set false for a second kind of owner, so the count stays one number
+     *   about one kind of thing.
+     */
+    private data class Usage(
+        val table: String,
+        val foreignKey: String,
+        val ownerColumn: String,
+        val isOptional: Boolean,
+        val isUnique: Boolean,
+        val counts: Boolean = true
+    )
+
+    /**
+     * Maps a category to its lookup table and to every table that references it.
      *
      * Lookup columns are typed so that user-supplied names are always bound as
-     * parameters. The referencing side is addressed by name because the six
-     * category types disagree on nullability, and the operations there only ever
-     * interpolate integer ids.
-     *
-     * @param usageOwnerColumn Column identifying the movie that uses the entry.
-     * @param usageIsOptional True when the reference can be nulled out instead of
-     *   deleting the referencing row (physical media outlives its distributor).
-     * @param usageIsUnique True when (owner, entry) pairs must stay unique, which
-     *   requires dropping duplicates after a merge.
+     * parameters. Most categories are referenced from one place; a store is
+     * named by vendor links, price history and purchases alike.
      */
     private data class Spec(
         val table: IntIdTable,
         val nameColumn: Column<String>,
         val descriptionColumn: Column<String?>?,
-        val usageTable: String,
-        val usageForeignKey: String,
-        val usageOwnerColumn: String,
-        val usageIsOptional: Boolean,
-        val usageIsUnique: Boolean
+        val usages: List<Usage>
     )
 
     private val specs: Map<CategoryType, Spec> = mapOf(
         CategoryType.GENRE to Spec(
             Genres, Genres.name, null,
-            "movie_genres", "genre_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("movie_genres", "genre_id", "movie_id", isOptional = false, isUnique = true))
         ),
         CategoryType.SUBGENRE to Spec(
             Subgenres, Subgenres.name, null,
-            "movie_subgenres", "subgenre_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("movie_subgenres", "subgenre_id", "movie_id", isOptional = false, isUnique = true))
         ),
         CategoryType.COLLECTION to Spec(
             Collections, Collections.name, Collections.description,
-            "movie_collections", "collection_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("movie_collections", "collection_id", "movie_id", isOptional = false, isUnique = true))
         ),
         // Counted per release rather than per movie: a distributor's reach is the
         // number of physical units it published, and a box set is one of those no
         // matter how many films it holds.
         CategoryType.DISTRIBUTOR to Spec(
             Distributors, Distributors.name, null,
-            "releases", "distributor_id", "id", usageIsOptional = true, usageIsUnique = false
+            listOf(Usage("releases", "distributor_id", "id", isOptional = true, isUnique = false))
         ),
         CategoryType.THEME to Spec(
             Themes, Themes.name, null,
-            "movie_themes", "theme_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("movie_themes", "theme_id", "movie_id", isOptional = false, isUnique = true))
         ),
         CategoryType.COUNTRY to Spec(
             Countries, Countries.name, null,
-            "movie_countries", "country_id", "movie_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("movie_countries", "country_id", "movie_id", isOptional = false, isUnique = true))
         ),
         // Counted per wishlist item rather than per movie.
         CategoryType.WISHLIST_TAG to Spec(
             WishlistTags, WishlistTags.name, null,
-            "wishlist_item_tags", "tag_id", "item_id", usageIsOptional = false, usageIsUnique = true
+            listOf(Usage("wishlist_item_tags", "tag_id", "item_id", isOptional = false, isUnique = true))
+        ),
+        // Counted per wishlist item: how many things are tracked at or were
+        // logged from the store. Deleting a store stops the tracking (a link
+        // with no store is not a link) but leaves the prices and purchases it
+        // recorded, which are history rather than configuration.
+        CategoryType.STORE to Spec(
+            Stores, Stores.name, null,
+            listOf(
+                Usage("wishlist_item_vendor_links", "store_id", "item_id", isOptional = false, isUnique = true),
+                Usage("wishlist_price_history", "store_id", "item_id", isOptional = true, isUnique = false),
+                Usage("purchases", "store_id", "id", isOptional = true, isUnique = false, counts = false)
+            )
         )
     )
+
+    init {
+        // A type added to the enum without a spec would otherwise only fail the
+        // first time somebody opened that tab
+        val unmapped = CategoryType.entries - specs.keys
+        require(unmapped.isEmpty()) { "Category types with no lookup mapping: $unmapped" }
+    }
 
     private fun spec(type: CategoryType): Spec = specs.getValue(type)
 
@@ -233,16 +267,19 @@ class CategoryDao {
     }
 
     /**
-     * Delete an entry. Movie references are removed; physical media entries keep
-     * existing with no distributor.
+     * Delete an entry. Movie references are removed; rows that can outlive the
+     * entry (a release without a distributor, a price without a store) keep
+     * existing with the reference nulled.
      */
     suspend fun delete(type: CategoryType, id: Int): Boolean = DatabaseFactory.dbQuery {
         val spec = spec(type)
 
-        if (spec.usageIsOptional) {
-            execute("UPDATE ${spec.usageTable} SET ${spec.usageForeignKey} = NULL WHERE ${spec.usageForeignKey} = $id")
-        } else {
-            execute("DELETE FROM ${spec.usageTable} WHERE ${spec.usageForeignKey} = $id")
+        spec.usages.forEach { usage ->
+            if (usage.isOptional) {
+                execute("UPDATE ${usage.table} SET ${usage.foreignKey} = NULL WHERE ${usage.foreignKey} = $id")
+            } else {
+                execute("DELETE FROM ${usage.table} WHERE ${usage.foreignKey} = $id")
+            }
         }
 
         spec.table.deleteWhere { spec.table.id eq id } > 0
@@ -286,61 +323,67 @@ class CategoryDao {
 
     /**
      * Repoint every reference from [sourceIds] to [targetId] and delete the source
-     * entries. Returns how many movies were affected.
+     * entries. Returns how many owners were affected.
      */
     private fun repoint(spec: Spec, sourceIds: List<Int>, targetId: Int): Int {
         val idList = sourceIds.joinToString(", ")
 
-        val affectedMovies = selectInt(
-            """
-            SELECT count(DISTINCT ${spec.usageOwnerColumn}) FROM ${spec.usageTable}
-            WHERE ${spec.usageForeignKey} IN ($idList)
-            """.trimIndent()
-        )
+        val owners = countingOwnersSql(spec) { fk -> "$fk IN ($idList)" }
+        val affectedOwners = selectInt("SELECT count(DISTINCT owner_id) FROM ($owners) owners")
 
-        execute(
-            """
-            UPDATE ${spec.usageTable} SET ${spec.usageForeignKey} = $targetId
-            WHERE ${spec.usageForeignKey} IN ($idList)
-            """.trimIndent()
-        )
-
-        if (spec.usageIsUnique) {
+        spec.usages.forEach { usage ->
             execute(
                 """
-                DELETE FROM ${spec.usageTable} a
-                USING ${spec.usageTable} b
-                WHERE a.${spec.usageOwnerColumn} = b.${spec.usageOwnerColumn}
-                  AND a.${spec.usageForeignKey} = b.${spec.usageForeignKey}
-                  AND a.id > b.id
+                UPDATE ${usage.table} SET ${usage.foreignKey} = $targetId
+                WHERE ${usage.foreignKey} IN ($idList)
                 """.trimIndent()
             )
+
+            if (usage.isUnique) {
+                execute(
+                    """
+                    DELETE FROM ${usage.table} a
+                    USING ${usage.table} b
+                    WHERE a.${usage.ownerColumn} = b.${usage.ownerColumn}
+                      AND a.${usage.foreignKey} = b.${usage.foreignKey}
+                      AND a.id > b.id
+                    """.trimIndent()
+                )
+            }
         }
 
         spec.table.deleteWhere { spec.table.id inList sourceIds }
 
-        return affectedMovies
+        return affectedOwners
     }
 
-    private fun usageCount(spec: Spec, id: Int): Int = selectInt(
-        """
-        SELECT count(DISTINCT ${spec.usageOwnerColumn}) FROM ${spec.usageTable}
-        WHERE ${spec.usageForeignKey} = $id
-        """.trimIndent()
-    )
+    private fun usageCount(spec: Spec, id: Int): Int {
+        val owners = countingOwnersSql(spec) { fk -> "$fk = $id" }
+        return selectInt("SELECT count(DISTINCT owner_id) FROM ($owners) owners")
+    }
 
-    private fun usageCounts(spec: Spec): Map<Int, Int> = TransactionManager.current().exec(
-        """
-        SELECT ${spec.usageForeignKey} AS entry_id, count(DISTINCT ${spec.usageOwnerColumn}) AS uses
-        FROM ${spec.usageTable}
-        WHERE ${spec.usageForeignKey} IS NOT NULL
-        GROUP BY ${spec.usageForeignKey}
-        """.trimIndent()
-    ) { rs ->
-        buildMap {
-            while (rs.next()) put(rs.getInt("entry_id"), rs.getInt("uses"))
+    private fun usageCounts(spec: Spec): Map<Int, Int> {
+        val owners = countingOwnersSql(spec) { fk -> "$fk IS NOT NULL" }
+        return TransactionManager.current().exec(
+            "SELECT entry_id, count(DISTINCT owner_id) AS uses FROM ($owners) owners GROUP BY entry_id"
+        ) { rs ->
+            buildMap {
+                while (rs.next()) put(rs.getInt("entry_id"), rs.getInt("uses"))
+            }
+        } ?: emptyMap()
+    }
+
+    /**
+     * The (entry, owner) pairs from every table that counts toward usage, as one
+     * union so an owner naming the entry twice is still counted once.
+     * [condition] builds the filter from the foreign key column name, which
+     * differs from table to table.
+     */
+    private fun countingOwnersSql(spec: Spec, condition: (fkColumn: String) -> String): String =
+        spec.usages.filter { it.counts }.joinToString("\n    UNION\n") { usage ->
+            "    SELECT ${usage.foreignKey} AS entry_id, ${usage.ownerColumn} AS owner_id " +
+                "FROM ${usage.table} WHERE ${condition(usage.foreignKey)}"
         }
-    } ?: emptyMap()
 
     private fun selectInt(sql: String): Int =
         TransactionManager.current().exec(sql) { rs -> if (rs.next()) rs.getInt(1) else 0 } ?: 0

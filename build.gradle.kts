@@ -236,7 +236,7 @@ tasks.register<JavaExec>("backfillCastCrew") {
 // Custom task for converting inline category strings into lookup table references
 tasks.register<JavaExec>("migrateCategories") {
     group = "application"
-    description = "Move themes, countries, and physical media distributors into lookup tables"
+    description = "Move themes, countries, distributors and store names into lookup tables"
     val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
     classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
     mainClass.set("org.btmonier.database.CategoryMigrationKt")
@@ -274,7 +274,7 @@ tasks.register<JavaExec>("migrateReleases") {
 // Custom task for refreshing wishlist prices from blu-ray.com
 tasks.register<JavaExec>("refreshWishlistPrices") {
     group = "application"
-    description = "Re-scrape blu-ray.com prices for wishlist items (--all, --force, --limit N, --dry-run)"
+    description = "Re-scrape wishlist prices from blu-ray.com and any linked stores (--all, --force, --limit N, --dry-run)"
     val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
     classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
     mainClass.set("org.btmonier.WishlistPriceRefreshKt")

@@ -4,6 +4,7 @@ import org.btmonier.AppSettings
 import org.btmonier.Purchase
 import org.btmonier.computeTax
 import org.btmonier.roundToCents
+import org.jetbrains.exposed.dao.id.EntityID
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
@@ -20,6 +21,8 @@ import java.time.LocalDate
  * history after conversion.
  */
 class PurchaseDao {
+
+    private val categoryDao = CategoryDao()
 
     suspend fun getForRelease(releaseId: Int): Purchase? = DatabaseFactory.dbQuery {
         getForReleaseInTransaction(releaseId)
@@ -57,17 +60,19 @@ class PurchaseDao {
     /**
      * Every purchase, for the spend totals on the wishlist summary.
      */
-    internal fun allInTransaction(): List<Purchase> =
-        Purchases.selectAll().map(::rowToPurchase)
+    internal fun allInTransaction(): List<Purchase> {
+        val stores = storeNamesInTransaction()
+        return Purchases.selectAll().map { rowToPurchase(it, stores) }
+    }
 
     internal fun getForReleaseInTransaction(releaseId: Int): Purchase? =
         Purchases.selectAll().where { Purchases.releaseId eq releaseId }
-            .map(::rowToPurchase)
+            .map { rowToPurchase(it) }
             .firstOrNull()
 
     internal fun getForItemInTransaction(itemId: Int): Purchase? =
         Purchases.selectAll().where { Purchases.wishlistItemId eq itemId }
-            .map(::rowToPurchase)
+            .map { rowToPurchase(it) }
             .firstOrNull()
 
     /**
@@ -173,7 +178,8 @@ class PurchaseDao {
     }
 
     private fun write(statement: UpdateBuilder<*>, purchase: Purchase) {
-        statement[Purchases.vendor] = purchase.vendor
+        statement[Purchases.storeId] = purchase.vendor
+            ?.let { EntityID(categoryDao.getOrCreateInTransaction(CategoryType.STORE, it), Stores) }
         statement[Purchases.orderDate] = parseDate(purchase.orderDate)
         statement[Purchases.orderNumber] = purchase.orderNumber
         statement[Purchases.trackingUrl] = purchase.trackingUrl
@@ -189,12 +195,19 @@ class PurchaseDao {
     private fun parseDate(value: String?): LocalDate? =
         value?.trim()?.takeIf { it.isNotEmpty() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
 
-    internal fun rowToPurchase(row: ResultRow): Purchase = Purchase(
+    /** Store names by id, for turning the purchase's store reference into a name. */
+    internal fun storeNamesInTransaction(): Map<Int, String> =
+        Stores.selectAll().associate { it[Stores.id].value to it[Stores.name] }
+
+    internal fun rowToPurchase(
+        row: ResultRow,
+        storeNames: Map<Int, String> = storeNamesInTransaction()
+    ): Purchase = Purchase(
         subtotal = row[Purchases.subtotal].toDouble(),
         taxRate = row[Purchases.taxRate].toDouble(),
         taxAmount = row[Purchases.taxAmount].toDouble(),
         shipping = row[Purchases.shipping].toDouble(),
-        vendor = row[Purchases.vendor],
+        vendor = row[Purchases.storeId]?.let { storeNames[it.value] },
         orderDate = row[Purchases.orderDate]?.toString(),
         orderNumber = row[Purchases.orderNumber],
         trackingUrl = row[Purchases.trackingUrl],

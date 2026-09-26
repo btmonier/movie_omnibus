@@ -289,6 +289,8 @@ fun Application.configureServer() {
                     "DELETE /api/wishlist/{id}/prices/{obsId} - Delete a price observation",
                     "POST /api/wishlist/{id}/refresh-price - Re-scrape blu-ray.com for this item",
                     "POST /api/wishlist/refresh-prices - Re-scrape every wanted/ordered item",
+                    "POST /api/wishlist/refresh-prices/start - Begin that pass in the background",
+                    "GET /api/wishlist/refresh-prices/progress - How far the background pass has got",
                     "GET /api/releases/{id}/purchase - What was paid for a release",
                     "PUT /api/releases/{id}/purchase - Record or replace what was paid",
                     "DELETE /api/releases/{id}/purchase - Remove the purchase record",

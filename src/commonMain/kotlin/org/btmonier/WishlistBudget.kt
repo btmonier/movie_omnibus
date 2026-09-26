@@ -17,40 +17,48 @@ private val WishlistItem.price: Double
     get() = currentPrice ?: 0.0
 
 /**
- * The outcome of one roll. [picks] holds fewer than [requestedCount] items only
- * when that many could not fit; [minimumBudgetForCount] is then the smallest
- * budget that would have worked, or null when there are not even that many
- * priced items to choose from.
+ * The outcome of one roll. When [requestedCount] is set, [picks] holds fewer
+ * items only when that many could not fit; [minimumBudgetForCount] is then the
+ * smallest budget that would have worked, or null when there are not even that
+ * many priced items to choose from. When [requestedCount] is null, the roll
+ * spends as much of the budget as it can with no target count.
  */
 data class BudgetPickResult(
     val picks: List<WishlistItem>,
     val total: Double,
     val leftover: Double,
-    val requestedCount: Int,
+    val requestedCount: Int?,
     val eligibleCount: Int,
     val minimumBudgetForCount: Double? = null
 ) {
-    /** True when the roll produced the number of items that was asked for. */
+    /** True when the roll met what was asked for. */
     val isComplete: Boolean
-        get() = picks.size == requestedCount && requestedCount > 0
+        get() = when (requestedCount) {
+            null -> picks.isNotEmpty() || eligibleCount == 0
+            else -> picks.size == requestedCount && requestedCount > 0
+        }
 }
 
 /**
- * Randomly choose [count] of [candidates] whose prices together stay within
+ * Randomly choose items from [candidates] whose prices together stay within
  * [budget]. Items without a price are ignored. Pass a seeded [random] for a
  * repeatable result.
  *
- * When [count] items cannot fit, the result holds as many as do, cheapest
+ * When [count] is set, exactly that many items are picked when possible. When
+ * [count] is null, as many items as fit are picked and the roll favors
+ * spending as much of the budget as it can.
+ *
+ * When a fixed [count] cannot fit, the result holds as many as do, cheapest
  * first, so the caller can say how close the budget came.
  */
 fun pickWithinBudget(
     candidates: List<WishlistItem>,
-    count: Int,
+    count: Int?,
     budget: Double,
     random: Random = Random.Default
 ): BudgetPickResult {
     val eligible = candidates.filter { it.price > 0.0 }
-    val wanted = count.coerceAtLeast(0)
+    val wanted = count?.coerceAtLeast(0)
 
     fun result(picks: List<WishlistItem>, minimum: Double? = null): BudgetPickResult {
         val total = roundToCents(picks.sumOf { it.price })
@@ -64,7 +72,14 @@ fun pickWithinBudget(
         )
     }
 
-    if (wanted == 0 || eligible.isEmpty() || budget <= 0.0) return result(emptyList())
+    if (eligible.isEmpty() || budget <= 0.0) return result(emptyList())
+    if (wanted == 0) return result(emptyList())
+
+    if (wanted == null) {
+        val picks = pickToMaximizeBudget(eligible, budget, random)
+        val minimum = if (picks.isEmpty()) roundToCents(eligible.minOf { it.price }) else null
+        return result(picks, minimum = minimum)
+    }
 
     // The cheapest `wanted` items are the only combination worth testing: if
     // they do not fit, no other set of that size will either.
@@ -86,6 +101,30 @@ fun pickWithinBudget(
     // A budget that only a handful of combinations satisfy can defeat every
     // shuffle, so trade the priciest pick down until the set fits.
     return result(repairToFit(eligible, wanted, budget, random) ?: cheapestSet)
+}
+
+/** Pick as many items as fit while spending as much of [budget] as possible. */
+private fun pickToMaximizeBudget(
+    eligible: List<WishlistItem>,
+    budget: Double,
+    random: Random
+): List<WishlistItem> {
+    val cheapestPrice = eligible.minOf { it.price }
+    if (cheapestPrice > budget + EPSILON) return emptyList()
+
+    var best = greedyFill(eligible.sortedByDescending { it.price }, Int.MAX_VALUE, budget)
+    var bestTotal = best.sumOf { it.price }
+
+    repeat(SHUFFLE_ATTEMPTS) {
+        val picks = greedyFill(eligible.shuffled(random), Int.MAX_VALUE, budget)
+        val total = picks.sumOf { it.price }
+        if (total > bestTotal + EPSILON) {
+            best = picks
+            bestTotal = total
+        }
+    }
+
+    return best
 }
 
 /** Take items in the order given, skipping any that would break the budget. */

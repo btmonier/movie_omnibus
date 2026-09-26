@@ -580,6 +580,38 @@ suspend fun fetchAllDistributors(): List<DistributorResponse> {
     return Json.decodeFromString(json)
 }
 
+/**
+ * Every shop a price was seen at or a purchase was made from, for the store
+ * pickers. Same lookup table the Manage Categories "Stores" tab edits.
+ */
+suspend fun fetchAllStores(): List<String> {
+    val response = window.fetch("$API_BASE_URL/stores").await()
+    if (!response.ok) throw Exception("Failed to load stores: ${response.errorMessage()}")
+    return Json.decodeFromString<List<DistributorResponse>>(response.text().await()).map { it.name }
+}
+
+/**
+ * The store list, held here because the forms that name a store (logging a
+ * price, adding a link, recording a purchase) render synchronously inside HTML
+ * builders and so cannot fetch it themselves. Pages that show one of those
+ * forms load it first with [ensureLoaded].
+ */
+object StoreOptions {
+    var names: List<String> = emptyList()
+        private set
+
+    /** Load the list if it has not been loaded yet. A failure leaves it empty. */
+    suspend fun ensureLoaded() {
+        if (names.isNotEmpty()) return
+        reload()
+    }
+
+    /** Re-read the list, after a store has been added or renamed. */
+    suspend fun reload() {
+        names = runCatching { fetchAllStores() }.getOrDefault(names)
+    }
+}
+
 suspend fun createDistributor(name: String): DistributorResponse {
     val response = window.fetch("$API_BASE_URL/distributors", RequestInit(
         method = "POST",
@@ -912,13 +944,60 @@ data class WishlistImportResponse(
 @kotlinx.serialization.Serializable
 data class WishlistMoviesRequest(val movieIds: List<Int>)
 
+/** What one price source said during a refresh. */
+@kotlinx.serialization.Serializable
+data class SourceRefreshResult(
+    val source: String,
+    val success: Boolean,
+    val price: Double? = null,
+    val observationsAdded: Int = 0,
+    val error: String? = null
+)
+
 @kotlinx.serialization.Serializable
 data class PriceRefreshResponse(
     val success: Boolean,
     val item: WishlistItem? = null,
     val prices: BluRayPrices? = null,
     val observationsAdded: Int = 0,
+    val sources: List<SourceRefreshResult> = emptyList(),
     val error: String? = null
+)
+
+@kotlinx.serialization.Serializable
+data class VendorLinkRequest(
+    val url: String,
+    val vendor: String? = null,
+    val price: Double? = null
+)
+
+@kotlinx.serialization.Serializable
+data class VendorSearchResponse(
+    val query: String,
+    val candidates: List<VendorCandidate> = emptyList(),
+    val storesSearched: List<String> = emptyList(),
+    val errors: List<String> = emptyList(),
+    val error: String? = null
+)
+
+/**
+ * How far a background "refresh all prices" pass has got. [total] and
+ * [completed] count pages, which is what the time is spent on; [checkedItems]
+ * counts the things the user asked about.
+ */
+@kotlinx.serialization.Serializable
+data class RefreshProgressResponse(
+    val jobId: Long,
+    val total: Int,
+    val completed: Int,
+    val checkedItems: Int,
+    val failed: Int,
+    val priceChanges: Int,
+    val skipped: Int,
+    val lastSource: String? = null,
+    val done: Boolean,
+    val alreadyRunning: Boolean = false,
+    val errors: List<String> = emptyList()
 )
 
 @kotlinx.serialization.Serializable
@@ -1067,6 +1146,21 @@ suspend fun addWishlistPriceObservation(id: Int, observation: PriceObservation):
     return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
 }
 
+/** Correct a price that was logged by hand. Scraped prices cannot be edited. */
+suspend fun updateWishlistPriceObservation(
+    id: Int,
+    observationId: Int,
+    observation: PriceObservation
+): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/prices/$observationId", RequestInit(
+        method = "PUT",
+        headers = jsonHeaders,
+        body = Json.encodeToString(PriceObservation.serializer(), observation)
+    )).await()
+    if (!response.ok) throw Exception("Failed to update the price: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
 suspend fun deleteWishlistPriceObservation(id: Int, observationId: Int): Boolean {
     val response = window.fetch("$API_BASE_URL/wishlist/$id/prices/$observationId", RequestInit(method = "DELETE")).await()
     return response.ok
@@ -1078,6 +1172,45 @@ suspend fun refreshWishlistItemPrice(id: Int): PriceRefreshResponse {
 }
 
 /**
+ * Look for this item at the stores that can be searched. Defaults to the
+ * item's own title when [query] is blank.
+ */
+suspend fun searchVendorCandidates(id: Int, query: String? = null): VendorSearchResponse {
+    val suffix = query?.trim()?.takeIf { it.isNotEmpty() }?.let { "?q=${encodeURIComponent(it)}" } ?: ""
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/vendor-search$suffix").await()
+    if (!response.ok) throw Exception("Failed to search stores: ${response.errorMessage()}")
+    return Json.decodeFromString(VendorSearchResponse.serializer(), response.text().await())
+}
+
+/**
+ * Start tracking this item at a store product page, and read its price now.
+ *
+ * A store with a reader of its own is identified from the URL server-side and
+ * names itself. Anywhere else, [vendor] is the name to file it under and
+ * [price] is what it is asking, used when the page publishes nothing readable.
+ */
+suspend fun addWishlistVendorLink(
+    id: Int,
+    url: String,
+    vendor: String? = null,
+    price: Double? = null
+): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/vendor-links", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(VendorLinkRequest.serializer(), VendorLinkRequest(url, vendor, price))
+    )).await()
+    if (!response.ok) throw Exception("Failed to link the store: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+suspend fun deleteWishlistVendorLink(id: Int, linkId: Int): WishlistItem {
+    val response = window.fetch("$API_BASE_URL/wishlist/$id/vendor-links/$linkId", RequestInit(method = "DELETE")).await()
+    if (!response.ok) throw Exception("Failed to remove the store: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
+}
+
+/**
  * Re-scrape every wanted or ordered item. Items checked in the last hour are
  * skipped unless [force] is set.
  */
@@ -1086,6 +1219,25 @@ suspend fun refreshAllWishlistPrices(force: Boolean = false): BulkPriceRefreshRe
     val response = window.fetch(url, RequestInit(method = "POST")).await()
     if (!response.ok) throw Exception("Failed to refresh prices: ${response.errorMessage()}")
     return Json.decodeFromString(BulkPriceRefreshResponse.serializer(), response.text().await())
+}
+
+/**
+ * Begin a refresh pass in the background and return its starting progress.
+ * A pass already running is returned rather than a second one started.
+ */
+suspend fun startWishlistPriceRefresh(force: Boolean = false): RefreshProgressResponse {
+    val url = "$API_BASE_URL/wishlist/refresh-prices/start" + if (force) "?force=true" else ""
+    val response = window.fetch(url, RequestInit(method = "POST")).await()
+    if (!response.ok) throw Exception("Failed to start the refresh: ${response.errorMessage()}")
+    return Json.decodeFromString(RefreshProgressResponse.serializer(), response.text().await())
+}
+
+/** How far the running (or last) refresh pass got, or null if there was none. */
+suspend fun fetchWishlistPriceRefreshProgress(): RefreshProgressResponse? {
+    val response = window.fetch("$API_BASE_URL/wishlist/refresh-prices/progress").await()
+    if (response.status == 404.toShort()) return null
+    if (!response.ok) throw Exception("Failed to read refresh progress: ${response.errorMessage()}")
+    return Json.decodeFromString(RefreshProgressResponse.serializer(), response.text().await())
 }
 
 // ==================== Purchase API ====================

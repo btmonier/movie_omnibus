@@ -27,7 +27,8 @@ private enum class CategoryKind(
     DISTRIBUTORS("distributors", "Distributors", "Distributor", "mdi-factory"),
     THEMES("themes", "Themes", "Theme", "mdi-lightbulb-outline"),
     COUNTRIES("countries", "Countries", "Country", "mdi-earth"),
-    WISHLIST_TAGS("wishlist-tags", "Wishlist Tags", "Wishlist tag", "mdi-heart-outline")
+    WISHLIST_TAGS("wishlist-tags", "Wishlist Tags", "Wishlist tag", "mdi-heart-outline"),
+    STORES("stores", "Stores", "Store", "mdi-storefront-outline")
 }
 
 /**
@@ -649,6 +650,9 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
             entry.usageCount == 0 -> "It is not used by any ${usageNoun()}."
             activeKind == CategoryKind.DISTRIBUTORS ->
                 "The ${movieCountLabel(entry.usageCount)} using it will keep their physical media entries, but without a distributor."
+            activeKind == CategoryKind.STORES ->
+                "The ${movieCountLabel(entry.usageCount)} tracked there will stop being checked, but the prices " +
+                    "and purchases already recorded from it are kept."
             else -> "It will be removed from the ${movieCountLabel(entry.usageCount)} using it."
         }
 
@@ -699,7 +703,7 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
     /** What a usage count counts: releases for distributors, wishlist items for tags, movies otherwise. */
     private fun usageNoun(): String = when (activeKind) {
         CategoryKind.DISTRIBUTORS -> "release"
-        CategoryKind.WISHLIST_TAGS -> "wishlist item"
+        CategoryKind.WISHLIST_TAGS, CategoryKind.STORES -> "wishlist item"
         else -> "movie"
     }
 
