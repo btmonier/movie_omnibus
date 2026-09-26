@@ -8,7 +8,7 @@ plugins {
 }
 
 group = "org.btmonier"
-version = "0.7.0"
+version = "0.7.1"
 
 repositories {
     mavenCentral()
