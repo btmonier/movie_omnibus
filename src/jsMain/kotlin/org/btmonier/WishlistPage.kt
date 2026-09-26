@@ -36,6 +36,7 @@ private enum class GroupBy(val slug: String, val label: String) {
 
 private const val BUDGET_AMOUNT_KEY = "wishlist-budget-amount"
 private const val BUDGET_COUNT_KEY = "wishlist-budget-count"
+private const val BUDGET_GOAL_KEY = "wishlist-budget-goal"
 private const val BUDGET_ANY_COUNT_KEY = "wishlist-budget-any-count"
 private const val BUDGET_SKIP_PREORDERS_KEY = "wishlist-budget-skip-preorders"
 private const val BUDGET_EXPANDED_KEY = "wishlist-budget-expanded"
@@ -72,7 +73,8 @@ class WishlistPage(
 
     private var budgetAmount = localStorage.getItem(BUDGET_AMOUNT_KEY)?.toDoubleOrNull() ?: 100.0
     private var budgetCount = localStorage.getItem(BUDGET_COUNT_KEY)?.toIntOrNull() ?: 3
-    private var budgetAnyCount = localStorage.getItem(BUDGET_ANY_COUNT_KEY) == "true"
+    private var budgetGoal = BudgetGoal.fromSlug(localStorage.getItem(BUDGET_GOAL_KEY))
+        ?: if (localStorage.getItem(BUDGET_ANY_COUNT_KEY) == "true") BudgetGoal.FILL_BUDGET else BudgetGoal.COUNT
     private var budgetSkipPreorders = localStorage.getItem(BUDGET_SKIP_PREORDERS_KEY) == "true"
     private var budgetExpanded = localStorage.getItem(BUDGET_EXPANDED_KEY) != "false"
     private var budgetResult: BudgetPickResult? = null
@@ -550,8 +552,12 @@ class WishlistPage(
         if (amount == amount.toLong().toDouble()) amount.toLong().toString() else formatMoney(amount).removePrefix("$")
 
     private fun roll() {
-        val count = if (budgetAnyCount) null else budgetCount
-        budgetResult = pickWithinBudget(budgetCandidates(), count, budgetAmount)
+        val candidates = budgetCandidates()
+        budgetResult = when (budgetGoal) {
+            BudgetGoal.COUNT -> pickWithinBudget(candidates, budgetCount, budgetAmount)
+            BudgetGoal.FILL_BUDGET -> pickWithinBudget(candidates, null, budgetAmount)
+            BudgetGoal.MOST_ITEMS -> pickMostWithinBudget(candidates, budgetAmount)
+        }
         renderBudgetPicker()
     }
 
@@ -596,7 +602,7 @@ class WishlistPage(
                         }
                         div {
                             style = "font-size: 13px; color: #5f6368; margin-top: 2px;"
-                            +"Randomly picks items from your wishlist that fit a budget, with an optional item count"
+                            +"Randomly picks items from your wishlist that fit a budget - a set number, the most spent, or the most items"
                         }
                     }
                     span {
@@ -639,6 +645,25 @@ class WishlistPage(
             }
 
             div {
+                style = "flex: 0 1 190px; min-width: 160px;"
+                formLabel("Goal")
+                select {
+                    style = formInputStyle()
+                    attributes["title"] = "Set number: exactly that many items. Spend the most: use as much of the budget as possible. " +
+                        "Most items: as many physical units as the budget covers."
+                    BudgetGoal.entries.forEach { g ->
+                        option { value = g.slug; selected = budgetGoal == g; +g.label }
+                    }
+                    onChangeFunction = { event ->
+                        budgetGoal = BudgetGoal.fromSlug((event.target as HTMLSelectElement).value) ?: BudgetGoal.COUNT
+                        localStorage.setItem(BUDGET_GOAL_KEY, budgetGoal.slug)
+                        renderBudgetPicker()
+                    }
+                }
+            }
+
+            div {
+                val countDisabled = budgetGoal != BudgetGoal.COUNT
                 style = "flex: 0 1 150px; min-width: 130px;"
                 formLabel("How many items")
                 input(type = InputType.number) {
@@ -646,8 +671,8 @@ class WishlistPage(
                     attributes["min"] = "1"
                     attributes["max"] = "25"
                     attributes["step"] = "1"
-                    disabled = budgetAnyCount
-                    style = formInputStyle() + if (budgetAnyCount) " opacity: 0.55;" else ""
+                    disabled = countDisabled
+                    style = formInputStyle() + if (countDisabled) " opacity: 0.55;" else ""
                     onInputFunction = { event ->
                         val entered = (event.target as HTMLInputElement).value.toIntOrNull()
                         if (entered != null && entered in 1..25) {
@@ -656,22 +681,6 @@ class WishlistPage(
                         }
                     }
                 }
-            }
-
-            label {
-                style = """
-                    display: flex; align-items: center; gap: 8px; height: 40px; font-size: 14px;
-                    color: #202124; cursor: pointer; user-select: none;
-                """.trimIndent()
-                input(type = InputType.checkBox) {
-                    checked = budgetAnyCount
-                    onChangeFunction = { event ->
-                        budgetAnyCount = (event.target as HTMLInputElement).checked
-                        localStorage.setItem(BUDGET_ANY_COUNT_KEY, budgetAnyCount.toString())
-                        renderBudgetPicker()
-                    }
-                }
-                +"Any number (fill budget)"
             }
 
             label {
@@ -745,6 +754,8 @@ class WishlistPage(
                         "None of your wishlist items have a price yet, so there is nothing to pick from."
                     result.requestedCount == null && result.minimumBudgetForCount != null ->
                         "${formatMoney(budgetAmount)} is below the cheapest priced item at ${formatMoney(result.minimumBudgetForCount)}."
+                    result.requestedCount == null ->
+                        "Enter a budget above ${formatMoney(0.0)} to roll."
                     result.minimumBudgetForCount == null ->
                         "Only ${result.eligibleCount} priced wishlist item${if (result.eligibleCount == 1) "" else "s"} to choose from, fewer than the ${result.requestedCount} asked for."
                     else ->
@@ -772,6 +783,12 @@ class WishlistPage(
             div {
                 style = "font-size: 15px; color: #202124; font-weight: 500;"
                 +"${result.picks.size} pick${if (result.picks.size == 1) "" else "s"} · ${formatMoney(result.total)} of ${formatMoney(budgetAmount)} · ${formatMoney(result.leftover)} left"
+            }
+            if (budgetGoal == BudgetGoal.MOST_ITEMS && result.isComplete) {
+                div {
+                    style = "font-size: 12px; color: #80868b; margin-top: 4px;"
+                    +"${result.picks.size} is the most items ${formatMoney(budgetAmount)} covers. Roll again for a different set of that size."
+                }
             }
             div {
                 style = "font-size: 12px; color: #80868b; margin-top: 4px;"

@@ -7,6 +7,20 @@ import kotlin.random.Random
  * buy this month without picking favourites.
  */
 
+/** What a roll aims for once the budget is set. */
+enum class BudgetGoal(val slug: String, val label: String) {
+    /** Exactly the number of items asked for. */
+    COUNT("count", "Set number of items"),
+    /** As much of the budget spent as possible, however many items that takes. */
+    FILL_BUDGET("fill", "Spend the most"),
+    /** As many items as the budget covers. */
+    MOST_ITEMS("most", "Most items");
+
+    companion object {
+        fun fromSlug(slug: String?): BudgetGoal? = entries.firstOrNull { it.slug == slug }
+    }
+}
+
 /** Cent-level slack so a total that is exactly the budget is not rejected. */
 private const val EPSILON = 1e-6
 
@@ -101,6 +115,37 @@ fun pickWithinBudget(
     // A budget that only a handful of combinations satisfy can defeat every
     // shuffle, so trade the priciest pick down until the set fits.
     return result(repairToFit(eligible, wanted, budget, random) ?: cheapestSet)
+}
+
+/**
+ * Randomly choose the largest number of items from [candidates] that [budget]
+ * can cover, so it buys as many physical units as possible. The count is set
+ * by the cheapest items, but which items make up the set is random among every
+ * set of that size that fits, so rolling again gives a different selection.
+ *
+ * The result's [BudgetPickResult.requestedCount] is that largest count. When
+ * not even one item fits, it is null and [BudgetPickResult.minimumBudgetForCount]
+ * is the cheapest item's price, the same as a roll with no count.
+ */
+fun pickMostWithinBudget(
+    candidates: List<WishlistItem>,
+    budget: Double,
+    random: Random = Random.Default
+): BudgetPickResult {
+    val most = maxItemsWithinBudget(candidates, budget)
+    return pickWithinBudget(candidates, if (most == 0) null else most, budget, random)
+}
+
+/** How many priced items [budget] can cover at most: the cheapest ones, taken in order. */
+fun maxItemsWithinBudget(candidates: List<WishlistItem>, budget: Double): Int {
+    var spent = 0.0
+    var count = 0
+    for (price in candidates.map { it.price }.filter { it > 0.0 }.sorted()) {
+        if (spent + price > budget + EPSILON) break
+        spent += price
+        count++
+    }
+    return count
 }
 
 /** Pick as many items as fit while spending as much of [budget] as possible. */

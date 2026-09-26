@@ -147,6 +147,54 @@ class WishlistBudgetTest {
     }
 
     @Test
+    fun `most-items mode picks as many items as the budget can cover`() {
+        // The four cheapest are 12.25 + 14.99 + 17.75 + 19.99 = 64.98; a fifth (22.50) would be 87.48.
+        assertEquals(4, maxItemsWithinBudget(shelf, 80.0))
+        repeat(50) { seed ->
+            val result = pickMostWithinBudget(shelf, budget = 80.0, random = Random(seed))
+            assertTrue(result.isComplete, "Seed $seed was incomplete")
+            assertEquals(4, result.picks.size, "Seed $seed picked ${result.picks.size}")
+            assertEquals(4, result.requestedCount)
+            assertTrue(result.total <= 80.0, "Seed $seed spent ${result.total}")
+            assertEquals(4, result.picks.map { it.id }.toSet().size, "Seed $seed repeated an item")
+        }
+    }
+
+    @Test
+    fun `most-items mode varies which items make up the set`() {
+        val distinct = (1..25).map { seed ->
+            pickMostWithinBudget(shelf, budget = 80.0, random = Random(seed)).picks.map { it.title }.toSet()
+        }.toSet()
+        assertTrue(distinct.size > 1, "Every seed produced the same set of picks")
+    }
+
+    @Test
+    fun `most-items mode beats fill-budget on count when cheap items are plentiful`() {
+        val cheapAndPricey = listOf(
+            item("Pricey", 50.0),
+            item("Cheap A", 10.0),
+            item("Cheap B", 10.0),
+            item("Cheap C", 10.0),
+            item("Cheap D", 10.0),
+            item("Cheap E", 10.0)
+        )
+        repeat(25) { seed ->
+            val result = pickMostWithinBudget(cheapAndPricey, budget = 50.0, random = Random(seed))
+            assertEquals(5, result.picks.size, "Seed $seed picked ${result.picks.size}")
+            assertTrue(result.picks.none { it.title == "Pricey" })
+        }
+    }
+
+    @Test
+    fun `most-items mode reports the cheapest price when nothing fits`() {
+        val result = pickMostWithinBudget(shelf, budget = 10.0, random = Random(1))
+        assertTrue(result.picks.isEmpty())
+        assertNull(result.requestedCount)
+        assertEquals(12.25, assertNotNull(result.minimumBudgetForCount))
+        assertEquals(0, maxItemsWithinBudget(emptyList(), 100.0))
+    }
+
+    @Test
     fun `fill-budget mode is repeatable for the same seed`() {
         val first = pickWithinBudget(shelf, count = null, budget = 80.0, random = Random(11))
         val again = pickWithinBudget(shelf, count = null, budget = 80.0, random = Random(11))
