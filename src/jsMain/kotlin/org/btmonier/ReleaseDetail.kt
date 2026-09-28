@@ -283,6 +283,20 @@ class ReleaseDetail(
                             padding: 9px 16px;
                             font-size: 14px;
                             cursor: pointer;
+                            background-color: #e8f0fe;
+                            color: #1a73e8;
+                            border: none;
+                            border-radius: 4px;
+                            font-weight: 500;
+                        """.trimIndent()
+                        +"Edit release"
+                        onClickFunction = { openEditRelease(current) }
+                    }
+                    button {
+                        style = """
+                            padding: 9px 16px;
+                            font-size: 14px;
+                            cursor: pointer;
                             background-color: #fce8e6;
                             color: #d93025;
                             border: none;
@@ -551,6 +565,24 @@ class ReleaseDetail(
                     font-size: 13px;
                     cursor: pointer;
                     background-color: transparent;
+                    color: #1a73e8;
+                    border: 1px solid #c6dafc;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    flex-shrink: 0;
+                """.trimIndent()
+                attributes["onmouseover"] = "this.style.backgroundColor='#e8f0fe'"
+                attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+                +"Edit"
+                onClickFunction = { openEditFilm(film) }
+            }
+
+            button {
+                style = """
+                    padding: 6px 12px;
+                    font-size: 13px;
+                    cursor: pointer;
+                    background-color: transparent;
                     color: #d93025;
                     border: 1px solid #f3c1bd;
                     border-radius: 4px;
@@ -594,6 +626,115 @@ class ReleaseDetail(
                 }
             }
         )
+    }
+
+    private fun openEditRelease(current: Release) {
+        PhysicalMediaForm(
+            container,
+            onSave = { media, _ ->
+                updateRelease(
+                    releaseId,
+                    Release(
+                        mediaTypes = media.mediaTypes,
+                        title = media.title,
+                        isCollection = media.isCollection,
+                        distributor = media.distributor,
+                        releaseDate = media.releaseDate,
+                        blurayComUrl = media.blurayComUrl,
+                        location = media.location,
+                        images = media.images
+                    )
+                )
+                release = fetchRelease(releaseId)
+                render()
+                loadFilms()
+            },
+            onCancel = {}
+        ).showEditRelease(current)
+    }
+
+    /**
+     * Edit what belongs to one film on this release alone: its entry letter and
+     * the title the release lists it under.
+     */
+    private fun openEditFilm(film: ReleaseFilm) {
+        val dialogId = "release-film-edit-dialog"
+        val letterId = "$dialogId-letter"
+        val altTitleId = "$dialogId-alt-title"
+        fun close() = document.getElementById(dialogId)?.remove()
+
+        close()
+        container.append {
+            div {
+                id = dialogId
+                style = modalOverlayStyle()
+                onClickFunction = { event ->
+                    if (event.target == document.getElementById(dialogId)) close()
+                }
+                div {
+                    style = modalPanelStyle(460)
+                    h2 {
+                        style = "margin: 0 0 4px 0; color: #202124; font-size: 20px;"
+                        +"Edit film on release"
+                    }
+                    p {
+                        style = "margin: 0 0 20px 0; color: #5f6368; font-size: 14px;"
+                        +film.title
+                    }
+
+                    div {
+                        style = "margin-bottom: 16px;"
+                        formLabel("Entry letter", letterId)
+                        input(type = InputType.text) {
+                            id = letterId
+                            value = film.entryLetter ?: ""
+                            placeholder = "A-Z"
+                            maxLength = "1"
+                            style = formInputStyle() + " text-transform: uppercase;"
+                            attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
+                        }
+                    }
+
+                    div {
+                        formLabel("Alternate title on this release", altTitleId)
+                        input(type = InputType.text) {
+                            id = altTitleId
+                            value = film.alternateTitle ?: ""
+                            placeholder = "e.g., Spirits of Bruce Lee"
+                            style = formInputStyle()
+                        }
+                    }
+
+                    div {
+                        style = "display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px;"
+                        button {
+                            style = secondaryButtonStyle()
+                            +"Cancel"
+                            onClickFunction = { close() }
+                        }
+                        button {
+                            style = primaryButtonStyle()
+                            +"Save"
+                            onClickFunction = {
+                                val letter = (document.getElementById(letterId) as? HTMLInputElement)
+                                    ?.value?.trim()?.takeIf { it.isNotBlank() }
+                                val altTitle = (document.getElementById(altTitleId) as? HTMLInputElement)
+                                    ?.value?.trim()?.takeIf { it.isNotBlank() }
+                                mainScope.launch {
+                                    try {
+                                        linkMovieToRelease(releaseId, film.movieId, letter, altTitle)
+                                        close()
+                                        loadFilms()
+                                    } catch (e: Exception) {
+                                        alertDialog.show(title = "Error", message = e.message ?: "Failed to save the film.")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private fun confirmDeleteRelease(current: Release) {

@@ -58,6 +58,13 @@ class PhysicalMediaForm(
     private var purchaseFields: PurchaseFormFields? = null
 
     /**
+     * True when editing a release on its own rather than one film's copy of it:
+     * the per-film fields (entry letter, alternate title) have no film to belong
+     * to, and the purchase is edited from the release's own panel instead.
+     */
+    private var releaseOnly: Boolean = false
+
+    /**
      * Show the form for creating a new physical media entry. [existingEntries] are
      * the movie's current entries, used to pre-fill the next free entry letter.
      */
@@ -67,6 +74,7 @@ class PhysicalMediaForm(
         imageUrls.add("" to null) // Start with one empty image field
         selectedDistributor = null
         linkedRelease = null
+        releaseOnly = false
         sharedWithCount = 0
         suggestedEntryLetter = nextEntryLetter(existingEntries)
         existingPurchase = null
@@ -102,6 +110,7 @@ class PhysicalMediaForm(
         // shared with other films is locked down; a release this film has to
         // itself stays fully editable.
         linkedRelease = null
+        releaseOnly = false
         sharedWithCount = media.sharedWithCount
         suggestedEntryLetter = nextEntryLetter(existingEntries, excludingId = media.id)
         existingPurchase = null
@@ -117,6 +126,40 @@ class PhysicalMediaForm(
             }
             render()
         }
+    }
+
+    /**
+     * Show the form for editing a release itself, from the release browser.
+     * [onSave] receives the release-level fields as a [PhysicalMedia] whose
+     * [PhysicalMedia.releaseId] is the release's id; the purchase edit is always
+     * [PurchaseEdit.Unchanged].
+     */
+    fun showEditRelease(release: Release) {
+        editingMedia = PhysicalMedia(
+            mediaTypes = release.mediaTypes,
+            title = release.title,
+            isCollection = release.isCollection,
+            distributor = release.distributor,
+            releaseDate = release.releaseDate,
+            blurayComUrl = release.blurayComUrl,
+            location = release.location,
+            images = release.images,
+            releaseId = release.id,
+            sharedWithCount = release.filmCount
+        )
+        imageUrls.clear()
+        imageUrls.addAll(release.displayImages().map { it.imageUrl to it.description })
+        if (imageUrls.isEmpty()) {
+            imageUrls.add("" to null)
+        }
+        selectedDistributor = release.distributor
+        linkedRelease = null
+        releaseOnly = true
+        sharedWithCount = release.filmCount
+        suggestedEntryLetter = null
+        existingPurchase = null
+        purchaseFields = null
+        render()
     }
 
     /**
@@ -167,7 +210,11 @@ class PhysicalMediaForm(
 
                     h2 {
                         style = "margin-top: 0; color: #202124;"
-                        +if (editingMedia != null) "Edit Physical Media" else "Add Physical Media"
+                        +when {
+                            releaseOnly -> "Edit Release"
+                            editingMedia != null -> "Edit Physical Media"
+                            else -> "Add Physical Media"
+                        }
                     }
 
                     renderFormFields()
@@ -227,7 +274,21 @@ class PhysicalMediaForm(
         val linked = isLinked()
 
         // Warn up front when an edit here will land on other films too
-        if (media != null && sharedWithCount > 0) {
+        if (releaseOnly && sharedWithCount > 1) {
+            div {
+                style = """
+                    margin-bottom: 20px;
+                    padding: 12px 14px;
+                    background-color: #fef7e0;
+                    border: 1px solid #fdd663;
+                    border-radius: 6px;
+                    font-size: 13px;
+                    color: #7c5800;
+                    line-height: 1.5;
+                """.trimIndent()
+                +"Changes here apply to all $sharedWithCount films on this release."
+            }
+        } else if (!releaseOnly && media != null && sharedWithCount > 0) {
             div {
                 style = """
                     margin-bottom: 20px;
@@ -401,6 +462,7 @@ class PhysicalMediaForm(
 
         } // end shared-release-identity-fields
 
+        if (!releaseOnly) {
         // Alternate title, for releases that list this film under a different name.
         inputField(
             "Alternate Title on This Release",
@@ -442,6 +504,7 @@ class PhysicalMediaForm(
                 attributes["oninput"] = "this.value = this.value.toUpperCase().replace(/[^A-Z]/g, '')"
             }
         }
+        } // end per-film fields
 
         // The rest of the release: what it is called, what is on it, and who put
         // it out. Shared with every film on the release, so hidden while linked.
@@ -599,7 +662,7 @@ class PhysicalMediaForm(
 
         // What was paid. Recorded against the release, so a box set has one
         // price however many films are on it.
-        div {
+        if (!releaseOnly) div {
             style = "margin-top: 24px; padding-top: 20px; border-top: 1px solid #e8eaed;"
             val fields = PurchaseFormFields(PURCHASE_FIELDS_PREFIX, existingPurchase, defaultTaxRate)
             purchaseFields = fields
@@ -969,14 +1032,14 @@ class PhysicalMediaForm(
                 return
             }
 
-            val entryLetter = (document.getElementById("form-entry-letter") as HTMLInputElement).value.trim()
-                .takeIf { it.isNotBlank() }
+            val entryLetter = (document.getElementById("form-entry-letter") as? HTMLInputElement)?.value?.trim()
+                ?.takeIf { it.isNotBlank() }
 
             val title = (document.getElementById("physical-media-form-title") as HTMLInputElement).value.trim()
                 .takeIf { it.isNotBlank() }
 
-            val alternateTitle = (document.getElementById("physical-media-form-alternate-title") as HTMLInputElement).value.trim()
-                .takeIf { it.isNotBlank() }
+            val alternateTitle = (document.getElementById("physical-media-form-alternate-title") as? HTMLInputElement)?.value?.trim()
+                ?.takeIf { it.isNotBlank() }
 
             val isCollection = (document.getElementById("physical-media-form-is-collection") as? HTMLInputElement)
                 ?.checked == true
