@@ -729,15 +729,15 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
 
 
     private fun showAddPhysicalMediaForm(movieId: Int) {
-        val physicalMediaForm = PhysicalMediaForm(container, onSave = { physicalMedia ->
-            createPhysicalMediaEntry(movieId, physicalMedia)
+        val physicalMediaForm = PhysicalMediaForm(container, onSave = { physicalMedia, purchaseEdit ->
+            createPhysicalMediaEntry(movieId, physicalMedia, purchaseEdit)
         }, onCancel = {})
         physicalMediaForm.showCreate(editingMovie?.physicalMedia ?: emptyList())
     }
 
     private fun showEditPhysicalMediaForm(movieId: Int, media: PhysicalMedia) {
-        val physicalMediaForm = PhysicalMediaForm(container, onSave = { updatedMedia ->
-            updatePhysicalMediaEntry(media.id!!, updatedMedia)
+        val physicalMediaForm = PhysicalMediaForm(container, onSave = { updatedMedia, purchaseEdit ->
+            updatePhysicalMediaEntry(media.id!!, updatedMedia, purchaseEdit)
         }, onCancel = {})
         physicalMediaForm.showEdit(media, editingMovie?.physicalMedia ?: emptyList())
     }
@@ -781,9 +781,10 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         }
     }
 
-    private suspend fun createPhysicalMediaEntry(movieId: Int, physicalMedia: PhysicalMedia) {
+    private suspend fun createPhysicalMediaEntry(movieId: Int, physicalMedia: PhysicalMedia, purchaseEdit: PurchaseEdit) {
         try {
-            createPhysicalMedia(movieId, physicalMedia)
+            val saved = createPhysicalMedia(movieId, physicalMedia)
+            val purchaseError = applyPurchaseEdit(saved.releaseId, purchaseEdit)
             // Refresh the movie data to show updated physical media
             val updatedMovie = editingMovie?.id?.let { getMovieById(it) }
             if (updatedMovie != null) {
@@ -791,8 +792,13 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                 render()
             }
             alertDialog.show(
-                title = "Success",
-                message = "Physical media added successfully!"
+                title = if (purchaseError == null) "Success" else "Purchase not saved",
+                message = if (purchaseError == null) {
+                    "Physical media added successfully!"
+                } else {
+                    "Physical media was added, but the purchase could not be saved: $purchaseError\n\n" +
+                        "Record it from the release's Purchase panel or by editing this entry."
+                }
             )
         } catch (e: Exception) {
             alertDialog.show(
@@ -803,9 +809,10 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
         }
     }
 
-    private suspend fun updatePhysicalMediaEntry(id: Int, physicalMedia: PhysicalMedia) {
+    private suspend fun updatePhysicalMediaEntry(id: Int, physicalMedia: PhysicalMedia, purchaseEdit: PurchaseEdit) {
         try {
-            updatePhysicalMedia(id, physicalMedia)
+            val saved = updatePhysicalMedia(id, physicalMedia)
+            val purchaseError = applyPurchaseEdit(saved.releaseId, purchaseEdit)
             // Refresh the movie data to show updated physical media
             val updatedMovie = editingMovie?.id?.let { getMovieById(it) }
             if (updatedMovie != null) {
@@ -813,8 +820,12 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                 render()
             }
             alertDialog.show(
-                title = "Success",
-                message = "Physical media updated successfully!"
+                title = if (purchaseError == null) "Success" else "Purchase not saved",
+                message = if (purchaseError == null) {
+                    "Physical media updated successfully!"
+                } else {
+                    "Physical media was updated, but the purchase could not be saved: $purchaseError"
+                }
             )
         } catch (e: Exception) {
             alertDialog.show(
@@ -822,6 +833,26 @@ class MovieForm(private val container: Element, private val onSave: suspend (Mov
                 message = "Failed to update physical media: ${e.message}"
             )
             throw e
+        }
+    }
+
+    /**
+     * Save or remove the purchase on the release an entry was just saved to.
+     * Returns the failure message rather than throwing, because the entry itself
+     * is already saved and retrying the whole form would add it a second time.
+     */
+    private suspend fun applyPurchaseEdit(releaseId: Int?, edit: PurchaseEdit): String? {
+        if (edit is PurchaseEdit.Unchanged) return null
+        if (releaseId == null) return "the entry has no release to attach it to"
+        return try {
+            when (edit) {
+                is PurchaseEdit.Save -> saveReleasePurchase(releaseId, edit.purchase)
+                PurchaseEdit.Remove -> deleteReleasePurchase(releaseId)
+                PurchaseEdit.Unchanged -> Unit
+            }
+            null
+        } catch (e: Exception) {
+            e.message ?: "unknown error"
         }
     }
 

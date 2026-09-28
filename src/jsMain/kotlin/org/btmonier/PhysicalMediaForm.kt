@@ -12,12 +12,25 @@ import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
 
+private const val PURCHASE_FIELDS_PREFIX = "physical-media-form-purchase"
+
+/**
+ * What the physical media form wants done to the release's purchase record.
+ * The purchase belongs to the release, so it can only be saved once the entry
+ * has been saved and its release id is known.
+ */
+sealed interface PurchaseEdit {
+    data object Unchanged : PurchaseEdit
+    data class Save(val purchase: Purchase) : PurchaseEdit
+    data object Remove : PurchaseEdit
+}
+
 /**
  * Modal form for creating and editing physical media entries.
  */
 class PhysicalMediaForm(
     private val container: Element,
-    private val onSave: suspend (PhysicalMedia) -> Unit,
+    private val onSave: suspend (PhysicalMedia, PurchaseEdit) -> Unit,
     private val onCancel: () -> Unit
 ) {
     private var editingMedia: PhysicalMedia? = null
@@ -39,6 +52,11 @@ class PhysicalMediaForm(
     /** Films already on the release being edited, other than this one. */
     private var sharedWithCount: Int = 0
 
+    /** What was paid for the release being edited, if anything was recorded. */
+    private var existingPurchase: Purchase? = null
+    private var defaultTaxRate: Double = DEFAULT_TAX_RATE
+    private var purchaseFields: PurchaseFormFields? = null
+
     /**
      * Show the form for creating a new physical media entry. [existingEntries] are
      * the movie's current entries, used to pre-fill the next free entry letter.
@@ -51,7 +69,20 @@ class PhysicalMediaForm(
         linkedRelease = null
         sharedWithCount = 0
         suggestedEntryLetter = nextEntryLetter(existingEntries)
-        render()
+        existingPurchase = null
+        mainScope.launch {
+            loadPurchaseDefaults()
+            render()
+        }
+    }
+
+    /**
+     * The tax rate and store list the purchase fields render with. Both render
+     * synchronously inside the HTML builder, so they have to be loaded first.
+     */
+    private suspend fun loadPurchaseDefaults() {
+        defaultTaxRate = runCatching { fetchSettings().defaultTaxRate }.getOrDefault(DEFAULT_TAX_RATE)
+        StoreOptions.ensureLoaded()
     }
 
     /**
@@ -73,7 +104,19 @@ class PhysicalMediaForm(
         linkedRelease = null
         sharedWithCount = media.sharedWithCount
         suggestedEntryLetter = nextEntryLetter(existingEntries, excludingId = media.id)
-        render()
+        existingPurchase = null
+        mainScope.launch {
+            loadPurchaseDefaults()
+            existingPurchase = media.releaseId?.let { releaseId ->
+                try {
+                    fetchReleasePurchase(releaseId)
+                } catch (e: Exception) {
+                    alertDialog.show(title = "Error", message = "Could not load the purchase for this release: ${e.message}")
+                    return@launch
+                }
+            }
+            render()
+        }
     }
 
     /**
@@ -554,6 +597,23 @@ class PhysicalMediaForm(
             }
         }
 
+        // What was paid. Recorded against the release, so a box set has one
+        // price however many films are on it.
+        div {
+            style = "margin-top: 24px; padding-top: 20px; border-top: 1px solid #e8eaed;"
+            val fields = PurchaseFormFields(PURCHASE_FIELDS_PREFIX, existingPurchase, defaultTaxRate)
+            purchaseFields = fields
+            with(fields) { render() }
+            p {
+                style = "color: #80868b; font-size: 12px; margin: 8px 0 0 0;"
+                +if (existingPurchase != null) {
+                    "Clear the subtotal to remove the purchase from this release."
+                } else {
+                    "Optional. Leave the subtotal blank to record no purchase."
+                }
+            }
+        }
+
         } // end shared-release-fields
 
         // Initial render of images
@@ -977,9 +1037,29 @@ class PhysicalMediaForm(
                 )
             }
 
+            // A linked release keeps whatever purchase it already has; the
+            // fields that would change it are hidden along with the rest.
+            val fields = purchaseFields
+            val purchaseEdit = when {
+                linked != null || fields == null -> PurchaseEdit.Unchanged
+                fields.hasSubtotal() -> PurchaseEdit.Save(fields.read()!!)
+                existingPurchase != null -> PurchaseEdit.Remove
+                else -> PurchaseEdit.Unchanged
+            }
+            if (purchaseEdit is PurchaseEdit.Save) {
+                val p = purchaseEdit.purchase
+                if (p.subtotal < 0 || p.shipping < 0 || (p.taxAmount ?: 0.0) < 0) {
+                    alertDialog.show(
+                        title = "Validation Error",
+                        message = "Purchase amounts must not be negative."
+                    )
+                    return
+                }
+            }
+
             mainScope.launch {
                 try {
-                    onSave(physicalMedia)
+                    onSave(physicalMedia, purchaseEdit)
                     close()
                 } catch (e: Exception) {
                     alertDialog.show(
