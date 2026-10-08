@@ -82,3 +82,31 @@ fun List<PriceObservation>.latestFromVendor(vendor: String): PriceObservation? =
         (it.source == PriceSource.VENDOR || it.source == PriceSource.MANUAL) &&
             it.vendor.equals(vendor, ignoreCase = true)
     }
+
+fun amazonUrl(asin: String): String = "https://www.amazon.com/dp/${asin.trim()}"
+
+/** Where to go to buy a wishlist item, and a short name for that place. */
+data class PurchaseLink(val url: String, val label: String)
+
+/**
+ * The page to open to buy [item]. Amazon wins whenever there is one, even if
+ * another store is cheaper; after it comes the newest price logged by hand
+ * with a URL, then the store asking the current price, then blu-ray.com.
+ */
+fun purchaseLink(item: WishlistItem): PurchaseLink? {
+    item.asin?.takeIf { it.isNotBlank() }?.let { return PurchaseLink(amazonUrl(it), "Amazon") }
+    item.buyUrl?.takeIf { it.isNotBlank() }?.let { return PurchaseLink(it, "Amazon (via blu-ray.com)") }
+
+    item.priceHistory.lastOrNull { it.source == PriceSource.MANUAL && !it.url.isNullOrBlank() }?.let {
+        return PurchaseLink(it.url!!, it.vendor?.takeIf { v -> v.isNotBlank() } ?: "Logged price")
+    }
+
+    val current = derivePrices(item.priceHistory).current
+    current?.vendor?.takeIf { it.isNotBlank() }?.let { vendor ->
+        item.vendorLinks.firstOrNull { it.vendor.equals(vendor, ignoreCase = true) && it.url.isNotBlank() }
+            ?.let { return PurchaseLink(it.url, it.vendor) }
+    }
+
+    item.blurayComUrl?.takeIf { it.isNotBlank() }?.let { return PurchaseLink(it, "blu-ray.com") }
+    return null
+}

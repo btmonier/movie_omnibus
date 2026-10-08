@@ -45,6 +45,7 @@ private const val BUDGET_EXPANDED_KEY = "wishlist-budget-expanded"
 private const val POLL_INTERVAL_MS = 1000L
 
 private const val SEARCH_INPUT_ID = "wishlist-search-input"
+private const val SELECTION_BAR_ID = "wishlist-selection-bar"
 
 /**
  * The wishlist: physical releases you want, imported from blu-ray.com with
@@ -78,6 +79,8 @@ class WishlistPage(
     private var budgetSkipPreorders = localStorage.getItem(BUDGET_SKIP_PREORDERS_KEY) == "true"
     private var budgetExpanded = localStorage.getItem(BUDGET_EXPANDED_KEY) != "false"
     private var budgetResult: BudgetPickResult? = null
+
+    private val selectedIds = mutableSetOf<Int>()
 
     private var mediaTypeOptions: List<String> = emptyList()
     private var distributorOptions: List<String> = emptyList()
@@ -141,11 +144,13 @@ class WishlistPage(
             alertDialog.show(title = "Error", message = "Failed to load the wishlist: ${e.message}")
         } finally {
             isLoading = false
+            selectedIds.retainAll(items.mapNotNull { it.id }.toSet())
             syncBudgetPicks()
             renderSummary()
             renderBudgetPicker()
             renderFilterOptions()
             renderResults()
+            renderSelectionBar()
             window.scrollTo(0.0, scrollY)
         }
     }
@@ -462,9 +467,84 @@ class WishlistPage(
                 div { id = "wishlist-budget"; style = "margin-bottom: 24px;" }
                 renderFilters()
                 div { id = "wishlist-results" }
+                div { id = SELECTION_BAR_ID; style = "position: sticky; bottom: 16px; z-index: 900; margin-top: 24px;" }
             }
         }
         renderBudgetPicker()
+        renderSelectionBar()
+    }
+
+    // --- Selection ---
+
+    private fun selectedItems(): List<WishlistItem> = items.filter { it.id in selectedIds }
+
+    private fun cardBorder(selected: Boolean): String =
+        if (selected) "2px solid #e91e63" else "1px solid #e8eaed"
+
+    /**
+     * Patches just the one card and the bar, so ticking a box does not rebuild
+     * the grid under the cursor.
+     */
+    private fun toggleSelection(item: WishlistItem, selected: Boolean) {
+        val id = item.id ?: return
+        if (selected) selectedIds.add(id) else selectedIds.remove(id)
+        (document.getElementById("wishlist-card-$id") as? HTMLElement)?.style?.border = cardBorder(selected)
+        renderSelectionBar()
+    }
+
+    private fun setSelection(ids: Collection<Int>, selected: Boolean) {
+        if (selected) selectedIds.addAll(ids) else selectedIds.removeAll(ids.toSet())
+        renderResults()
+        renderSelectionBar()
+    }
+
+    private fun renderSelectionBar() {
+        val target = document.getElementById(SELECTION_BAR_ID) ?: return
+        target.innerHTML = ""
+        val selected = selectedItems()
+        if (selected.isEmpty()) return
+
+        val priced = selected.mapNotNull { it.currentPrice }
+        val unpriced = selected.size - priced.size
+        val total = roundToCents(priced.sum())
+        val linkCount = selected.count { purchaseLink(it) != null }
+
+        target.append {
+            div {
+                style = """
+                    display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 14px 20px;
+                    background-color: #202124; color: white; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+                """.trimIndent()
+                span { classes = setOf("mdi", "mdi-checkbox-multiple-marked-outline"); style = "font-size: 24px; color: #f48fb1;" }
+                div {
+                    style = "flex: 1; min-width: 200px;"
+                    div {
+                        style = "font-size: 16px; font-weight: 500;"
+                        +"${selected.size} selected · ${formatMoney(total)}"
+                        if (unpriced > 0) {
+                            span { style = "font-size: 13px; color: #bdc1c6; font-weight: 400;"; +" ($unpriced without a price)" }
+                        }
+                    }
+                    div {
+                        style = "font-size: 12px; color: #bdc1c6; margin-top: 2px;"
+                        +"About ${formatMoney(total + computeTax(total, defaultTaxRate))} with ${formatPercent(defaultTaxRate)} tax, before shipping."
+                    }
+                }
+                button {
+                    style = primaryButtonStyle("#e91e63") + if (linkCount == 0) " opacity: 0.55; cursor: default;" else ""
+                    disabled = linkCount == 0
+                    attributes["title"] = "Amazon where there is one, otherwise the page a price was logged at, the store with the current price, or blu-ray.com"
+                    span { classes = setOf("mdi", "mdi-open-in-new"); style = "font-size: 18px;" }
+                    +"Open purchase links ($linkCount)"
+                    onClickFunction = { openPurchaseLinks(selected, container) }
+                }
+                button {
+                    style = "background: none; border: 1px solid #5f6368; color: white; padding: 9px 14px; border-radius: 4px; cursor: pointer; font-size: 14px;"
+                    +"Clear"
+                    onClickFunction = { setSelection(selectedIds.toList(), false) }
+                }
+            }
+        }
     }
 
     private fun renderSummary() {
@@ -794,6 +874,25 @@ class WishlistPage(
                 style = "font-size: 12px; color: #80868b; margin-top: 4px;"
                 +"About ${formatMoney(result.total + computeTax(result.total, defaultTaxRate))} with ${formatPercent(defaultTaxRate)} tax, before shipping."
             }
+            div {
+                style = "display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;"
+                val linkCount = result.picks.count { purchaseLink(it) != null }
+                button {
+                    style = outlineButtonStyle("#e91e63") + if (linkCount == 0) " opacity: 0.55; cursor: default;" else ""
+                    disabled = linkCount == 0
+                    attributes["title"] = "Amazon where there is one, otherwise the page a price was logged at, the store with the current price, or blu-ray.com"
+                    span { classes = setOf("mdi", "mdi-open-in-new"); style = "font-size: 16px;" }
+                    +"Open purchase links ($linkCount)"
+                    onClickFunction = { openPurchaseLinks(result.picks, container) }
+                }
+                button {
+                    style = outlineButtonStyle()
+                    attributes["title"] = "Add these picks to the items selected below"
+                    span { classes = setOf("mdi", "mdi-checkbox-multiple-marked-outline"); style = "font-size: 16px;" }
+                    +"Select these"
+                    onClickFunction = { setSelection(result.picks.mapNotNull { it.id }, true) }
+                }
+            }
         }
     }
 
@@ -838,6 +937,16 @@ class WishlistPage(
             span {
                 style = "font-size: 15px; font-weight: 600; color: ${if (item.atTarget) "#188038" else "#202124"}; flex-shrink: 0;"
                 +formatMoney(item.currentPrice)
+            }
+
+            purchaseLink(item)?.let { link ->
+                a(href = link.url, target = "_blank") {
+                    attributes["rel"] = "noopener"
+                    attributes["title"] = "Buy at ${link.label}"
+                    style = "color: #1a73e8; padding: 4px; display: inline-flex; flex-shrink: 0;"
+                    onClickFunction = { it.stopPropagation() }
+                    span { classes = setOf("mdi", "mdi-open-in-new"); style = "font-size: 18px;" }
+                }
             }
         }
     }
@@ -1078,7 +1187,26 @@ class WishlistPage(
 
             div {
                 style = "margin-bottom: 16px; color: #5f6368; font-size: 14px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
-                span { +"${visible.size} item${if (visible.size == 1) "" else "s"}" }
+                span {
+                    style = "display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;"
+                    span { +"${visible.size} item${if (visible.size == 1) "" else "s"}" }
+                    val visibleIds = visible.mapNotNull { it.id }
+                    val linkStyle = "background: none; border: none; padding: 0; color: #1a73e8; cursor: pointer; font-size: 14px;"
+                    if (!selectedIds.containsAll(visibleIds)) {
+                        button {
+                            style = linkStyle
+                            +"Select all shown"
+                            onClickFunction = { setSelection(visibleIds, true) }
+                        }
+                    }
+                    if (selectedIds.isNotEmpty()) {
+                        button {
+                            style = linkStyle
+                            +"Clear selection"
+                            onClickFunction = { setSelection(selectedIds.toList(), false) }
+                        }
+                    }
+                }
                 // The refresh pass has a bar of its own above; this is only for
                 // the list reloading
                 if (isLoading) {
@@ -1143,9 +1271,11 @@ class WishlistPage(
     }
 
     private fun FlowContent.itemCard(item: WishlistItem) {
+        val isSelected = item.id in selectedIds
         div {
+            item.id?.let { id = "wishlist-card-$it" }
             style = """
-                background-color: white; border: 1px solid #e8eaed; border-radius: 12px; overflow: hidden;
+                background-color: white; border: ${cardBorder(isSelected)}; border-radius: 12px; overflow: hidden;
                 display: flex; flex-direction: column; transition: transform 0.15s, box-shadow 0.15s;
             """.trimIndent()
             attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 20px rgba(0,0,0,0.10)'"
@@ -1173,6 +1303,24 @@ class WishlistPage(
                             classes = setOf("mdi", "mdi-star")
                             style = "position: absolute; top: 4px; left: 4px; color: #f9ab00; font-size: 18px; text-shadow: 0 0 3px white;"
                             attributes["title"] = "High priority"
+                        }
+                    }
+                    if (item.id != null) {
+                        label {
+                            style = """
+                                position: absolute; top: 2px; right: 2px; padding: 4px; display: flex;
+                                background-color: rgba(255,255,255,0.85); border-radius: 4px; cursor: pointer;
+                            """.trimIndent()
+                            attributes["title"] = "Select to total up and open purchase links"
+                            // Keeps the click from also opening the detail view
+                            onClickFunction = { it.stopPropagation() }
+                            input(type = InputType.checkBox) {
+                                checked = isSelected
+                                style = "margin: 0; width: 16px; height: 16px; cursor: pointer; accent-color: #e91e63;"
+                                onChangeFunction = { event ->
+                                    toggleSelection(item, (event.target as HTMLInputElement).checked)
+                                }
+                            }
                         }
                     }
                 }

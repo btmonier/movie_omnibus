@@ -1,8 +1,12 @@
 package org.btmonier
 
 import kotlinx.browser.document
+import kotlinx.browser.window
 import kotlinx.html.*
+import kotlinx.html.dom.append
 import kotlinx.html.js.onChangeFunction
+import kotlinx.html.js.onClickFunction
+import org.w3c.dom.Element
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
@@ -300,4 +304,87 @@ fun modalPanelStyle(maxWidth: Int = 640): String = """
  */
 fun camelCamelCamelUrl(asin: String): String = "https://camelcamelcamel.com/product/${asin.trim()}"
 
-fun amazonUrl(asin: String): String = "https://www.amazon.com/dp/${asin.trim()}"
+private const val PURCHASE_LINKS_NOTICE_ID = "purchase-links-notice"
+
+/**
+ * Open each item's [purchaseLink] in a tab of its own. Must be called straight
+ * from a click handler: browsers only let a page open tabs in response to one,
+ * and most allow just one tab per click until pop-ups are allowed for the site.
+ * Whatever the browser refused, and any item with nowhere to buy it, is listed
+ * in a notice so nothing is silently skipped.
+ */
+fun openPurchaseLinks(items: List<WishlistItem>, container: Element) {
+    val withLinks = items.map { it to purchaseLink(it) }
+    val unlinked = withLinks.filter { it.second == null }.map { it.first }
+    // "noopener" in the features string makes window.open return null even on
+    // success, so the opener is cut afterwards instead
+    val blocked = withLinks.mapNotNull { (item, link) ->
+        if (link == null) return@mapNotNull null
+        val tab = window.open(link.url, "_blank")
+        if (tab == null) item to link else {
+            tab.asDynamic().opener = null
+            null
+        }
+    }
+    if (blocked.isEmpty() && unlinked.isEmpty()) return
+    showPurchaseLinksNotice(container, blocked, unlinked)
+}
+
+private fun showPurchaseLinksNotice(
+    container: Element,
+    blocked: List<Pair<WishlistItem, PurchaseLink>>,
+    unlinked: List<WishlistItem>
+) {
+    document.getElementById(PURCHASE_LINKS_NOTICE_ID)?.remove()
+    val close = { document.getElementById(PURCHASE_LINKS_NOTICE_ID)?.remove() }
+    container.append {
+        div {
+            id = PURCHASE_LINKS_NOTICE_ID
+            style = modalOverlayStyle(2000)
+            onClickFunction = { event -> if (event.target == event.currentTarget) close() }
+            div {
+                style = modalPanelStyle(520)
+                h2 {
+                    style = "margin: 0 0 12px 0; font-size: 20px; font-weight: 500; color: #202124;"
+                    +if (blocked.isNotEmpty()) "Some tabs were blocked" else "Some items have no link"
+                }
+                if (blocked.isNotEmpty()) {
+                    p {
+                        style = "margin: 0 0 12px 0; font-size: 14px; color: #5f6368; line-height: 1.6;"
+                        +("The browser stopped ${blocked.size} tab${if (blocked.size == 1) "" else "s"} from opening. " +
+                            "Allow pop-ups for ${window.location.host} (the icon at the end of the address bar) to open them all in one click next time, or open them here:")
+                    }
+                    div {
+                        style = "display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px;"
+                        blocked.forEach { (item, link) ->
+                            a(href = link.url, target = "_blank") {
+                                attributes["rel"] = "noopener"
+                                style = "display: flex; align-items: center; gap: 8px; font-size: 14px; color: #1a73e8; text-decoration: none;"
+                                span { classes = setOf("mdi", "mdi-open-in-new"); style = "font-size: 16px;" }
+                                +"${item.title ?: "Untitled release"} - ${link.label}"
+                            }
+                        }
+                    }
+                }
+                if (unlinked.isNotEmpty()) {
+                    p {
+                        style = "margin: 0 0 6px 0; font-size: 14px; color: #5f6368; line-height: 1.6;"
+                        +"No Amazon link, logged price URL, store page or blu-ray.com page for:"
+                    }
+                    ul {
+                        style = "margin: 0 0 16px 0; padding-left: 20px; font-size: 14px; color: #202124;"
+                        unlinked.forEach { li { +(it.title ?: "Untitled release") } }
+                    }
+                }
+                div {
+                    style = "display: flex; justify-content: flex-end;"
+                    button {
+                        style = primaryButtonStyle()
+                        +"Done"
+                        onClickFunction = { close() }
+                    }
+                }
+            }
+        }
+    }
+}
