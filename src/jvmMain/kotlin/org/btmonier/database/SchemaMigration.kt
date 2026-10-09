@@ -26,7 +26,9 @@ object SchemaMigration {
         // Null on the rows that predate hand-added links, which is read as
         // "one of the registered stores" - true of every one of them.
         AdditiveColumn("wishlist_item_vendor_links", "reader", "varchar(20)"),
-        AdditiveColumn("wishlist_price_history", "url", "text")
+        AdditiveColumn("wishlist_price_history", "url", "text"),
+        // Filled in, and made NOT NULL, by OrderMigration
+        AdditiveColumn("purchases", "order_id", "int")
     )
 
     fun addMissingColumns(database: Database? = null) {

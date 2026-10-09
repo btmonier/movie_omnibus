@@ -135,7 +135,7 @@ class CategoryDao {
             listOf(
                 Usage("wishlist_item_vendor_links", "store_id", "item_id", isOptional = false, isUnique = true),
                 Usage("wishlist_price_history", "store_id", "item_id", isOptional = true, isUnique = false),
-                Usage("purchases", "store_id", "id", isOptional = true, isUnique = false, counts = false)
+                Usage("orders", "store_id", "id", isOptional = true, isUnique = false, counts = false)
             )
         )
     )

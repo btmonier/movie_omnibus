@@ -544,6 +544,9 @@ class WishlistItemDetailModal(
                 purchase.shippedDate?.let { detail("Shipped", formatDate(it)) }
                 purchase.receivedDate?.let { detail("Received", formatDate(it)) }
             }
+            sharedOrderSummary(purchase)?.let {
+                div { style = "margin-top: 10px; font-size: 12px; color: #5f6368;"; +it }
+            }
             purchase.trackingUrl?.let {
                 a(href = it, target = "_blank") {
                     style = "display: inline-flex; align-items: center; gap: 4px; margin-top: 10px; font-size: 13px; color: #1a73e8; text-decoration: none;"

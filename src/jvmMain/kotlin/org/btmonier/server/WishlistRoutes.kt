@@ -21,6 +21,10 @@ import org.btmonier.WishlistPriority
 import org.btmonier.WishlistRefreshJob
 import org.btmonier.WishlistStatus
 import org.btmonier.WishlistTransitionRequest
+import org.btmonier.WishlistBulkTransitionRequest
+import org.btmonier.WishlistBulkTransitionResponse
+import org.btmonier.WishlistOrderRequest
+import org.btmonier.database.BulkTransitionOutcome
 import org.btmonier.database.ReleaseDao
 import org.btmonier.database.TransitionOutcome
 import org.btmonier.database.WishlistDao
@@ -394,6 +398,49 @@ fun Route.wishlistRoutes(wishlistDao: WishlistDao, releaseDao: ReleaseDao, price
             is TransitionOutcome.Done -> call.respond(HttpStatusCode.OK, outcome.item)
             is TransitionOutcome.NotFound -> call.respond(HttpStatusCode.NotFound, mapOf("error" to "Wishlist item not found"))
             is TransitionOutcome.Invalid -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to outcome.message))
+        }
+    }
+
+    // POST /api/wishlist/orders - Several items bought in one checkout
+    post("/api/wishlist/orders") {
+        val request = try {
+            call.receive<WishlistOrderRequest>()
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
+            return@post
+        }
+        if (request.items.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "An order needs at least one item"))
+            return@post
+        }
+        if (request.items.any { it.subtotal < 0 } || request.shipping < 0 || (request.taxAmount ?: 0.0) < 0) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Amounts must not be negative"))
+            return@post
+        }
+        val created = wishlistDao.createOrder(request)
+        if (created == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "One or more wishlist items were not found"))
+        } else {
+            call.respond(HttpStatusCode.Created, created)
+        }
+    }
+
+    // POST /api/wishlist/bulk-status - One status change for several items
+    post("/api/wishlist/bulk-status") {
+        val request = try {
+            call.receive<WishlistBulkTransitionRequest>()
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
+            return@post
+        }
+        if (request.itemIds.isEmpty()) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "No items given"))
+            return@post
+        }
+        when (val outcome = wishlistDao.bulkTransition(request)) {
+            is BulkTransitionOutcome.Done -> call.respond(HttpStatusCode.OK, WishlistBulkTransitionResponse(outcome.items))
+            is BulkTransitionOutcome.NotFound -> call.respond(HttpStatusCode.NotFound, mapOf("error" to outcome.message))
+            is BulkTransitionOutcome.Invalid -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to outcome.message))
         }
     }
 

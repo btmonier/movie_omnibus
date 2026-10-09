@@ -7,6 +7,7 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
 import org.btmonier.AppSettings
+import org.btmonier.Order
 import org.btmonier.Purchase
 import org.btmonier.database.PurchaseDao
 
@@ -70,6 +71,46 @@ fun Route.purchaseRoutes(purchaseDao: PurchaseDao) {
             }
         } catch (e: Exception) {
             call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
+        }
+    }
+
+    // GET /api/orders/{id} - One order with its lines
+    get("/api/orders/{id}") {
+        val id = call.parameters["id"]?.toIntOrNull()
+        if (id == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid order ID"))
+            return@get
+        }
+        val order = purchaseDao.getOrder(id)
+        if (order == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Order not found"))
+        } else {
+            call.respond(HttpStatusCode.OK, order)
+        }
+    }
+
+    // PUT /api/orders/{id} - Update the shared fields, and line subtotals named by purchase id
+    put("/api/orders/{id}") {
+        val id = call.parameters["id"]?.toIntOrNull()
+        if (id == null) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid order ID"))
+            return@put
+        }
+        val order = try {
+            call.receive<Order>()
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid request body: ${e.message}"))
+            return@put
+        }
+        if (order.shipping < 0 || (order.taxAmount ?: 0.0) < 0 || order.lines.any { it.subtotal < 0 }) {
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Amounts must not be negative"))
+            return@put
+        }
+        val saved = purchaseDao.updateOrder(id, order)
+        if (saved == null) {
+            call.respond(HttpStatusCode.NotFound, mapOf("error" to "Order not found"))
+        } else {
+            call.respond(HttpStatusCode.OK, saved)
         }
     }
 

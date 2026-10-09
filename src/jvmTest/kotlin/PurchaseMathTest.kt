@@ -2,6 +2,8 @@ package org.btmonier
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class PurchaseMathTest {
 
@@ -41,5 +43,22 @@ class PurchaseMathTest {
     fun `total uses a custom rate when given`() {
         val purchase = Purchase(subtotal = 100.0, taxRate = 0.07)
         assertEquals(107.0, purchase.total, 0.0001)
+    }
+
+    @Test
+    fun `a purchase on a shared order totals its own share, not the order`() {
+        // $20 + $10 order, $1.80 tax, $6 shipping: the $20 item carries two thirds
+        val order = PurchaseOrder(id = 1, itemCount = 2, subtotal = 30.0, taxAmount = 1.80, shipping = 6.0, total = 37.80)
+        val purchase = Purchase(subtotal = 20.0, taxRate = 0.06, taxAmount = 1.20, shipping = 4.0, order = order)
+
+        assertEquals(25.20, purchase.total, 0.0001)
+        assertTrue(purchase.isSharedOrder)
+    }
+
+    @Test
+    fun `a purchase on an order of one is not shared`() {
+        val order = PurchaseOrder(id = 1, itemCount = 1, subtotal = 20.0, taxAmount = 1.20, total = 21.20)
+        assertFalse(Purchase(subtotal = 20.0, order = order).isSharedOrder)
+        assertFalse(Purchase(subtotal = 20.0).isSharedOrder)
     }
 }

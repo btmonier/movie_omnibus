@@ -28,6 +28,17 @@ fun formatMoney(amount: Double?): String {
     return "$sign\$$whole.$frac"
 }
 
+/**
+ * What a purchase's tax and shipping are a share of, for one bought on an
+ * order with other items; null for an order of one.
+ */
+fun sharedOrderSummary(purchase: Purchase): String? {
+    val order = purchase.order?.takeIf { it.itemCount > 1 } ?: return null
+    return "Part of an order of ${order.itemCount} items: ${formatMoney(order.subtotal)} + " +
+        "${formatMoney(order.taxAmount)} tax + ${formatMoney(order.shipping)} shipping = ${formatMoney(order.total)}. " +
+        "Tax and shipping above are this item's share, split by price."
+}
+
 /** "6%" or "6.5%" from a rate such as 0.06. */
 fun formatPercent(rate: Double): String {
     val pct = rate * 100

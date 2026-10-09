@@ -538,12 +538,59 @@ class WishlistPage(
                     +"Open purchase links ($linkCount)"
                     onClickFunction = { openPurchaseLinks(selected, container) }
                 }
+                bulkStepButton(selected, WishlistStatus.ORDERED, "Mark ordered")
+                bulkStepButton(selected, WishlistStatus.SHIPPED, "Mark shipped")
+                bulkStepButton(selected, WishlistStatus.OWNED, "Mark received")
                 button {
                     style = "background: none; border: 1px solid #5f6368; color: white; padding: 9px 14px; border-radius: 4px; cursor: pointer; font-size: 14px;"
                     +"Clear"
                     onClickFunction = { setSelection(selectedIds.toList(), false) }
                 }
             }
+        }
+    }
+
+    /** The selected items a bulk step applies to: the ones at the step before it. */
+    private fun eligibleFor(target: WishlistStatus, selected: List<WishlistItem>): List<WishlistItem> = when (target) {
+        WishlistStatus.ORDERED -> selected.filter { it.status == WishlistStatus.WISHLIST }
+        WishlistStatus.SHIPPED -> selected.filter { it.status == WishlistStatus.ORDERED }
+        WishlistStatus.OWNED -> selected.filter { it.status == WishlistStatus.ORDERED || it.status == WishlistStatus.SHIPPED }
+        WishlistStatus.WISHLIST -> emptyList()
+    }
+
+    private fun FlowContent.bulkStepButton(selected: List<WishlistItem>, target: WishlistStatus, label: String) {
+        val eligible = eligibleFor(target, selected)
+        if (eligible.isEmpty()) return
+        button {
+            style = "background: none; border: 1px solid #5f6368; color: white; padding: 9px 14px; border-radius: 4px; cursor: pointer; font-size: 14px; display: inline-flex; align-items: center; gap: 6px;"
+            if (eligible.size < selected.size) {
+                attributes["title"] = "${selected.size - eligible.size} of the selected items are not at this step and are left out"
+            }
+            span { classes = setOf("mdi", statusIcon(target)); style = "font-size: 18px; color: ${statusColors(target).first};" }
+            +"$label (${eligible.size})"
+            onClickFunction = { openBulkStep(target) }
+        }
+    }
+
+    private fun openBulkStep(target: WishlistStatus) {
+        val selected = selectedItems()
+        val eligible = eligibleFor(target, selected)
+        if (eligible.isEmpty()) return
+        val skipped = selected.size - eligible.size
+
+        val onDone: (List<WishlistItem>) -> Unit = { updated ->
+            reload()
+            if (target == WishlistStatus.OWNED) {
+                alertDialog.show(
+                    title = "Added to your collection",
+                    message = "${updated.size} item(s) are now releases in your collection."
+                )
+            }
+        }
+        if (target == WishlistStatus.ORDERED) {
+            BulkOrderDialog(container, eligible, defaultTaxRate, skipped, onDone).show()
+        } else {
+            BulkStatusDialog(container, eligible, target, skipped, onDone).show()
         }
     }
 
@@ -1415,7 +1462,11 @@ class WishlistPage(
             val purchase = item.purchase
             if (item.status != WishlistStatus.WISHLIST && purchase != null) {
                 span { style = "font-size: 17px; font-weight: 600; color: #202124;"; +formatMoney(purchase.total) }
-                span { style = "font-size: 12px; color: #5f6368;"; +("paid" + (purchase.vendor?.let { " at $it" } ?: "")) }
+                span {
+                    style = "font-size: 12px; color: #5f6368;"
+                    +("paid" + (purchase.vendor?.let { " at $it" } ?: ""))
+                    purchase.order?.takeIf { it.itemCount > 1 }?.let { +", 1 of ${it.itemCount} on the order" }
+                }
                 return@div
             }
 

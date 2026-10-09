@@ -15,6 +15,9 @@ import org.btmonier.WishlistMovie
 import org.btmonier.WishlistPriority
 import org.btmonier.WishlistSortField
 import org.btmonier.WishlistStatus
+import org.btmonier.WishlistBulkTransitionRequest
+import org.btmonier.WishlistOrderRequest
+import org.btmonier.WishlistOrderResponse
 import org.btmonier.WishlistSummary
 import org.btmonier.WishlistTransitionRequest
 import org.btmonier.derivePrices
@@ -60,6 +63,16 @@ sealed interface TransitionOutcome {
     data class Done(val item: WishlistItem) : TransitionOutcome
     data object NotFound : TransitionOutcome
     data class Invalid(val message: String) : TransitionOutcome
+}
+
+/**
+ * Result of moving several items at once. Nothing is written unless every
+ * item could be moved.
+ */
+sealed interface BulkTransitionOutcome {
+    data class Done(val items: List<WishlistItem>) : BulkTransitionOutcome
+    data class NotFound(val message: String) : BulkTransitionOutcome
+    data class Invalid(val message: String) : BulkTransitionOutcome
 }
 
 /**
@@ -121,7 +134,7 @@ class WishlistDao(
         val wanted = items.filter { it.status == WishlistStatus.WISHLIST }
         val priced = wanted.mapNotNull { it.currentPrice }
 
-        val purchases = purchaseDao.allInTransaction()
+        val orderTotals = purchaseDao.orderTotalsInTransaction()
         val thisYear = LocalDate.now().year.toString()
 
         WishlistSummary(
@@ -129,9 +142,9 @@ class WishlistDao(
             wishlistTotalAtCurrentPrices = org.btmonier.roundToCents(priced.sum()),
             wishlistPricedCount = priced.size,
             atTargetCount = wanted.count { it.atTarget },
-            spentAllTime = org.btmonier.roundToCents(purchases.sumOf { it.total }),
+            spentAllTime = org.btmonier.roundToCents(orderTotals.sumOf { it.second }),
             spentThisYear = org.btmonier.roundToCents(
-                purchases.filter { (it.orderDate ?: it.createdAt ?: "").startsWith(thisYear) }.sumOf { it.total }
+                orderTotals.filter { it.first.startsWith(thisYear) }.sumOf { it.second }
             )
         )
     }
@@ -501,7 +514,63 @@ class WishlistDao(
      * it. The item survives, pointing at the release, as the purchase record.
      */
     suspend fun transition(id: Int, request: WishlistTransitionRequest): TransitionOutcome = DatabaseFactory.dbQuery {
-        val item = getInTransaction(id) ?: return@dbQuery TransitionOutcome.NotFound
+        transitionInTransaction(id, request)
+    }
+
+    /**
+     * Put several items on one new order and move the ones still only wanted
+     * to ORDERED. Items further along keep their status. Returns null when any
+     * item does not exist, in which case nothing is written.
+     */
+    suspend fun createOrder(request: WishlistOrderRequest): WishlistOrderResponse? = DatabaseFactory.dbQuery {
+        val ids = request.items.map { it.itemId }.distinct()
+        val rows = WishlistItems.selectAll().where { WishlistItems.id inList ids }.toList()
+        if (rows.size != ids.size) return@dbQuery null
+
+        val orderId = purchaseDao.createOrderInTransaction(request)
+        val now = LocalDateTime.now()
+        WishlistItems.update({ (WishlistItems.id inList ids) and (WishlistItems.status eq WishlistStatus.WISHLIST.name) }) {
+            it[status] = WishlistStatus.ORDERED.name
+            it[statusChangedAt] = now
+        }
+
+        WishlistOrderResponse(
+            order = purchaseDao.getOrderInTransaction(orderId)!!,
+            items = ids.mapNotNull { getInTransaction(it) }
+        )
+    }
+
+    /**
+     * Apply one status change to several items, all or nothing: the first item
+     * that cannot be moved rolls the whole batch back.
+     */
+    suspend fun bulkTransition(request: WishlistBulkTransitionRequest): BulkTransitionOutcome = try {
+        DatabaseFactory.dbQuery {
+            val items = request.itemIds.distinct().map { id ->
+                val single = WishlistTransitionRequest(
+                    status = request.status,
+                    shippedDate = request.shippedDate,
+                    trackingUrl = request.trackingUrl,
+                    receivedDate = request.receivedDate,
+                    location = request.location,
+                    movieIds = request.movieIds?.get(id)
+                )
+                when (val outcome = transitionInTransaction(id, single)) {
+                    is TransitionOutcome.Done -> outcome.item
+                    TransitionOutcome.NotFound -> throw BulkAbort("Wishlist item $id not found", notFound = true)
+                    is TransitionOutcome.Invalid -> throw BulkAbort(outcome.message, notFound = false)
+                }
+            }
+            BulkTransitionOutcome.Done(items)
+        }
+    } catch (abort: BulkAbort) {
+        if (abort.notFound) BulkTransitionOutcome.NotFound(abort.message!!) else BulkTransitionOutcome.Invalid(abort.message!!)
+    }
+
+    private class BulkAbort(message: String, val notFound: Boolean) : Exception(message)
+
+    private fun transitionInTransaction(id: Int, request: WishlistTransitionRequest): TransitionOutcome {
+        val item = getInTransaction(id) ?: return TransitionOutcome.NotFound
 
         request.purchase?.let { purchaseDao.upsertForItemInTransaction(id, it) }
 
@@ -512,7 +581,7 @@ class WishlistDao(
         var releaseId: Int? = item.releaseId
         if (request.status == WishlistStatus.OWNED) {
             if (request.releaseId != null && !releaseDao.releaseExistsInTransaction(request.releaseId)) {
-                return@dbQuery TransitionOutcome.Invalid("Release ${request.releaseId} does not exist")
+                return TransitionOutcome.Invalid("Release ${request.releaseId} does not exist")
             }
 
             releaseId = request.releaseId
@@ -549,7 +618,7 @@ class WishlistDao(
             it[WishlistItems.releaseId] = releaseId?.let { rid -> EntityID(rid, Releases) }
         }
 
-        TransitionOutcome.Done(getInTransaction(id)!!)
+        return TransitionOutcome.Done(getInTransaction(id)!!)
     }
 
     // --- Internals ---
@@ -651,8 +720,8 @@ class WishlistDao(
                 )
             }
 
-        // Small enough to read whole: names are needed by price history, vendor
-        // links and purchases alike
+        // Small enough to read whole: names are needed by price history and
+        // vendor links alike
         val storeNames = purchaseDao.storeNamesInTransaction()
 
         val history = WishlistPriceHistory.selectAll().where { WishlistPriceHistory.itemId inList ids }
@@ -683,8 +752,7 @@ class WishlistDao(
                 )
             }
 
-        val purchases = Purchases.selectAll().where { Purchases.wishlistItemId inList ids }
-            .associate { it[Purchases.wishlistItemId]!!.value to purchaseDao.rowToPurchase(it, storeNames) }
+        val purchases = purchaseDao.forItemsInTransaction(ids)
 
         val distributorIds = rows.mapNotNull { it[WishlistItems.distributorId] }.distinct()
         val distributors = if (distributorIds.isEmpty()) emptyMap() else {

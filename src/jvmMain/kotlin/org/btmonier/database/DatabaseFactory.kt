@@ -28,6 +28,8 @@ object DatabaseFactory {
     /**
      * @param skipReleaseMigration Leave the physical media rows alone, so the
      *   migrateReleases task can run (and preview) the fold itself.
+     * @param skipOrderMigration Leave the purchases alone, so the migrateOrders
+     *   task can run (and preview) the move itself.
      */
     fun init(
         jdbcUrl: String? = null,
@@ -35,7 +37,8 @@ object DatabaseFactory {
         username: String? = null,
         password: String? = null,
         maximumPoolSize: Int? = null,
-        skipReleaseMigration: Boolean = false
+        skipReleaseMigration: Boolean = false,
+        skipOrderMigration: Boolean = false
     ) {
         val props = loadProperties()
 
@@ -111,6 +114,7 @@ object DatabaseFactory {
                 WishlistItemVendorLinks,
                 WishlistTags,
                 WishlistItemTags,
+                Orders,
                 Purchases
             )
         }
@@ -120,6 +124,11 @@ object DatabaseFactory {
 
         // Convert any remaining inline category strings into lookup table references
         CategoryMigration.migrateCategoriesToLookupTables(database)
+
+        // Move the per-purchase order fields onto shared orders
+        if (!skipOrderMigration) {
+            OrderMigration.migratePurchasesToOrders(database)
+        }
 
         // Collapse the old per-movie physical_media rows into shared releases
         if (!skipReleaseMigration) {

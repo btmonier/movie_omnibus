@@ -1136,6 +1136,28 @@ suspend fun transitionWishlistItem(id: Int, request: WishlistTransitionRequest):
     return Json.decodeFromString(WishlistItem.serializer(), response.text().await())
 }
 
+/** Put several items on one order, with tax and shipping entered once. */
+suspend fun createWishlistOrder(request: WishlistOrderRequest): WishlistOrderResponse {
+    val response = window.fetch("$API_BASE_URL/wishlist/orders", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistOrderRequest.serializer(), request)
+    )).await()
+    if (!response.ok) throw Exception("Failed to record the order: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistOrderResponse.serializer(), response.text().await())
+}
+
+/** Move several items to one status at once; nothing changes if any of them fails. */
+suspend fun bulkTransitionWishlistItems(request: WishlistBulkTransitionRequest): List<WishlistItem> {
+    val response = window.fetch("$API_BASE_URL/wishlist/bulk-status", RequestInit(
+        method = "POST",
+        headers = jsonHeaders,
+        body = Json.encodeToString(WishlistBulkTransitionRequest.serializer(), request)
+    )).await()
+    if (!response.ok) throw Exception("Failed to update the items: ${response.errorMessage()}")
+    return Json.decodeFromString(WishlistBulkTransitionResponse.serializer(), response.text().await()).items
+}
+
 suspend fun addWishlistPriceObservation(id: Int, observation: PriceObservation): WishlistItem {
     val response = window.fetch("$API_BASE_URL/wishlist/$id/prices", RequestInit(
         method = "POST",

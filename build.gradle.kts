@@ -252,6 +252,25 @@ tasks.register<JavaExec>("migrateCategories") {
     }
 }
 
+// Custom task for moving per-purchase order fields onto shared orders
+tasks.register<JavaExec>("migrateOrders") {
+    group = "application"
+    description = "Move each purchase's store, tax and shipping onto shared orders"
+    val jvmTarget = kotlin.targets.getByName("jvm") as org.jetbrains.kotlin.gradle.targets.jvm.KotlinJvmTarget
+    classpath = jvmTarget.compilations.getByName("main").runtimeDependencyFiles + jvmTarget.compilations.getByName("main").output.allOutputs
+    mainClass.set("org.btmonier.database.OrderMigrationKt")
+
+    // Use the same Java toolchain as the project (Java 21)
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    })
+
+    // Usage: ./gradlew migrateOrders --args="--dry-run"
+    if (project.hasProperty("args")) {
+        args(project.property("args").toString().split(" "))
+    }
+}
+
 // Custom task for folding per-movie physical media rows into shared releases
 tasks.register<JavaExec>("migrateReleases") {
     group = "application"

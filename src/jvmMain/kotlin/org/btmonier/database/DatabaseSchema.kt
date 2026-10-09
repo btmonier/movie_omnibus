@@ -305,23 +305,37 @@ object WishlistItemTags : IntIdTable("wishlist_item_tags") {
 }
 
 /**
- * What was paid for a physical unit. Attached to the wishlist item while the
- * order is in flight and to the release once it is owned; a release that was
- * never wishlisted has a purchase with only [releaseId] set.
+ * One checkout: what belongs to the order as a whole rather than to any one
+ * thing on it. Tax and shipping are charged once per order, however many
+ * items it holds.
  */
-object Purchases : IntIdTable("purchases") {
-    val wishlistItemId = optReference("wishlist_item_id", WishlistItems)
-    val releaseId = optReference("release_id", Releases).uniqueIndex()
+object Orders : IntIdTable("orders") {
     val storeId = optReference("store_id", Stores)
     val orderDate = date("order_date").nullable()
     val orderNumber = varchar("order_number", 100).nullable()
+    val taxRate = decimal("tax_rate", 6, 4) // e.g. 0.0600 for Iowa
+    // Null means "computed from the lines", so adding or removing an item keeps the tax right
+    val taxAmount = decimal("tax_amount", 10, 2).nullable()
+    val shipping = decimal("shipping", 10, 2)
+    val notes = text("notes").nullable()
+    val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
+}
+
+/**
+ * One item's line on an [Orders] row. Attached to the wishlist item while the
+ * order is in flight and to the release once it is owned; a release that was
+ * never wishlisted has a purchase with only [releaseId] set.
+ *
+ * Shipping and receipt dates live here rather than on the order, because one
+ * order often arrives in more than one box.
+ */
+object Purchases : IntIdTable("purchases") {
+    val orderId = reference("order_id", Orders)
+    val wishlistItemId = optReference("wishlist_item_id", WishlistItems)
+    val releaseId = optReference("release_id", Releases).uniqueIndex()
     val trackingUrl = text("tracking_url").nullable()
     val subtotal = decimal("subtotal", 10, 2)
-    val taxRate = decimal("tax_rate", 6, 4) // e.g. 0.0600 for Iowa
-    val taxAmount = decimal("tax_amount", 10, 2)
-    val shipping = decimal("shipping", 10, 2)
     val shippedDate = date("shipped_date").nullable()
     val receivedDate = date("received_date").nullable()
-    val notes = text("notes").nullable()
     val createdAt = datetime("created_at").defaultExpression(CurrentDateTime)
 }

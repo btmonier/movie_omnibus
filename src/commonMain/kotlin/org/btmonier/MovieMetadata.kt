@@ -321,9 +321,15 @@ data class VendorCandidate(
 )
 
 /**
- * What was paid for a physical unit. [taxRate] and [taxAmount] may be left
- * null when creating; the server then applies the configured default rate and
- * computes the amount from [subtotal].
+ * What was paid for one physical unit: a flat per-item view of its line on an
+ * [Order]. [vendor], [orderDate], [orderNumber], [taxRate] and [notes] belong
+ * to the order.
+ *
+ * Read back, [taxAmount] and [shipping] are this item's share of the order's
+ * (see [allocateOrderCosts]), so [total] is what this one item cost, and
+ * [order] carries the order-wide figures. Written, they are the order's own
+ * figures - the same thing for an order of one - and a null [taxAmount] means
+ * "compute it from the subtotals at [taxRate]".
  */
 @Serializable
 data class Purchase(
@@ -341,12 +347,128 @@ data class Purchase(
     val id: Int? = null,
     val releaseId: Int? = null,
     val wishlistItemId: Int? = null,
-    val createdAt: String? = null
+    val createdAt: String? = null,
+    val order: PurchaseOrder? = null
 ) {
     /** Subtotal plus tax plus shipping, using the computed tax when none is stored. */
     val total: Double
         get() = roundToCents(subtotal + (taxAmount ?: computeTax(subtotal, taxRate ?: DEFAULT_TAX_RATE)) + shipping)
+
+    /** True when this item shares its order, and so its tax and shipping, with others. */
+    val isSharedOrder: Boolean
+        get() = (order?.itemCount ?: 1) > 1
 }
+
+/**
+ * The order-wide figures behind a [Purchase]. [taxOverridden] is true when the
+ * tax was typed in rather than computed from [subtotal].
+ */
+@Serializable
+data class PurchaseOrder(
+    val id: Int,
+    val itemCount: Int,
+    val subtotal: Double,
+    val taxAmount: Double,
+    val taxOverridden: Boolean = false,
+    val shipping: Double = 0.0,
+    val total: Double
+)
+
+/**
+ * One checkout, holding everything charged once per order. [taxAmount] is an
+ * explicit override; null means it is computed from the line subtotals.
+ */
+@Serializable
+data class Order(
+    val vendor: String? = null,
+    val orderDate: String? = null,  // ISO date
+    val orderNumber: String? = null,
+    val taxRate: Double? = null,
+    val taxAmount: Double? = null,
+    val shipping: Double = 0.0,
+    val notes: String? = null,
+    val lines: List<OrderLine> = emptyList(),
+    val id: Int? = null,
+    val createdAt: String? = null
+) {
+    val subtotal: Double
+        get() = roundToCents(lines.sumOf { it.subtotal })
+
+    /** The tax charged: the override when there is one, otherwise computed. */
+    val effectiveTax: Double
+        get() = orderTax(lines.map { it.subtotal }, taxRate ?: DEFAULT_TAX_RATE, taxAmount)
+
+    val total: Double
+        get() = roundToCents(subtotal + effectiveTax + shipping)
+}
+
+/**
+ * One item on an [Order]. [title] is the wishlist item's or release's, for
+ * display. Updating an order only reads [purchaseId] and [subtotal].
+ */
+@Serializable
+data class OrderLine(
+    val subtotal: Double,
+    val purchaseId: Int? = null,
+    val wishlistItemId: Int? = null,
+    val releaseId: Int? = null,
+    val title: String? = null,
+    val shippedDate: String? = null,
+    val trackingUrl: String? = null,
+    val receivedDate: String? = null
+)
+
+/** One item to put on a new order, at what was paid for it. */
+@Serializable
+data class WishlistOrderItem(
+    val itemId: Int,
+    val subtotal: Double
+)
+
+/**
+ * Body of `POST /api/wishlist/orders`: several wishlist items bought in one
+ * checkout. Every field but [items] describes the order as a whole.
+ */
+@Serializable
+data class WishlistOrderRequest(
+    val items: List<WishlistOrderItem>,
+    val vendor: String? = null,
+    val orderDate: String? = null,
+    val orderNumber: String? = null,
+    val trackingUrl: String? = null,
+    val taxRate: Double? = null,
+    val taxAmount: Double? = null,
+    val shipping: Double = 0.0,
+    val notes: String? = null
+)
+
+@Serializable
+data class WishlistOrderResponse(
+    val order: Order,
+    val items: List<WishlistItem>
+)
+
+/**
+ * Body of `POST /api/wishlist/bulk-status`: one status change applied to
+ * several items, with the same dates, tracking URL and location for all.
+ * [movieIds] is keyed by item id; an item missing from it keeps the films it
+ * already names.
+ */
+@Serializable
+data class WishlistBulkTransitionRequest(
+    val itemIds: List<Int>,
+    val status: WishlistStatus,
+    val shippedDate: String? = null,
+    val trackingUrl: String? = null,
+    val receivedDate: String? = null,
+    val location: String? = null,
+    val movieIds: Map<Int, List<Int>>? = null
+)
+
+@Serializable
+data class WishlistBulkTransitionResponse(
+    val items: List<WishlistItem>
+)
 
 /**
  * Body of `POST /api/wishlist/import`: everything needed to wishlist a
@@ -396,6 +518,46 @@ fun roundToCents(amount: Double): Double {
  * Sales tax on [subtotal] at [rate], rounded to cents. Shipping is not taxed.
  */
 fun computeTax(subtotal: Double, rate: Double): Double = roundToCents(subtotal * rate)
+
+/**
+ * Tax on a whole order: [override] when one was typed in, otherwise computed
+ * once on the summed [subtotals] - not per line, which can round differently.
+ */
+fun orderTax(subtotals: List<Double>, rate: Double, override: Double? = null): Double =
+    override?.let { roundToCents(it) } ?: computeTax(roundToCents(subtotals.sum()), rate)
+
+/**
+ * Splits an order's [tax] and [shipping] across its lines in proportion to
+ * their [subtotals], returning (tax share, shipping share) per line in the
+ * same order. Shares are whole cents and add up to exactly [tax] and
+ * [shipping]; leftover cents go to the lines whose exact share was cut the
+ * most. When every subtotal is zero the costs are split evenly.
+ */
+fun allocateOrderCosts(subtotals: List<Double>, tax: Double, shipping: Double): List<Pair<Double, Double>> =
+    allocateCents(subtotals, tax).zip(allocateCents(subtotals, shipping))
+
+private fun allocateCents(weights: List<Double>, amount: Double): List<Double> {
+    if (weights.isEmpty()) return emptyList()
+    val totalCents = kotlin.math.round(roundToCents(amount.coerceAtLeast(0.0)) * 100).toLong()
+
+    val positive = weights.map { it.coerceAtLeast(0.0) }
+    val effective = if (positive.sum() <= 0.0) positive.map { 1.0 } else positive
+    val weightSum = effective.sum()
+
+    val exact = effective.map { totalCents * it / weightSum }
+    val cents = exact.map { kotlin.math.floor(it).toLong() }.toMutableList()
+    var leftover = totalCents - cents.sum()
+
+    val byRemainder = exact.indices.sortedWith(
+        compareByDescending<Int> { exact[it] - cents[it] }.thenBy { it }
+    )
+    for (index in byRemainder) {
+        if (leftover <= 0) break
+        cents[index] += 1
+        leftover--
+    }
+    return cents.map { it / 100.0 }
+}
 
 /**
  * A film a wishlist item will be linked to once it is owned.

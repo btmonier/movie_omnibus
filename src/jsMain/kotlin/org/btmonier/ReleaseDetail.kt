@@ -379,6 +379,9 @@ class ReleaseDetail(
                     purchase.shippedDate?.let { purchaseDetail("Shipped", formatDate(it)) }
                     purchase.receivedDate?.let { purchaseDetail("Received", formatDate(it)) }
                 }
+                sharedOrderSummary(purchase)?.let {
+                    div { style = "margin-top: 12px; font-size: 13px; color: #5f6368;"; +it }
+                }
                 purchase.notes?.takeIf { it.isNotBlank() }?.let {
                     div { style = "margin-top: 12px; font-size: 13px; color: #5f6368; white-space: pre-wrap;"; +it }
                 }

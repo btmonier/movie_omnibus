@@ -111,8 +111,15 @@ class PurchaseFormFields(
     private val initial: Purchase?,
     private val defaultTaxRate: Double
 ) {
-    private var taxAmountEdited = initial?.taxAmount != null &&
-        initial.taxAmount != computeTax(initial.subtotal, initial.taxRate ?: defaultTaxRate)
+    // On an order shared with other items, the tax and shipping fields edit the
+    // order's figures rather than this item's share of them
+    private val sharedOrder: PurchaseOrder? = initial?.order?.takeIf { it.itemCount > 1 }
+    private val otherItemsSubtotal: Double =
+        sharedOrder?.let { roundToCents(it.subtotal - initial!!.subtotal) } ?: 0.0
+
+    private var taxAmountEdited = initial?.order?.taxOverridden
+        ?: (initial?.taxAmount != null &&
+            initial.taxAmount != computeTax(initial.subtotal, initial.taxRate ?: defaultTaxRate))
 
     private fun id(field: String) = "$idPrefix-$field"
 
@@ -122,6 +129,20 @@ class PurchaseFormFields(
                 style = "margin: 0 0 12px 0; font-size: 15px; color: #202124; display: flex; align-items: center; gap: 8px;"
                 span { classes = setOf("mdi", "mdi-receipt-text-outline"); style = "color: #1a73e8; font-size: 18px;" }
                 +"Purchase"
+            }
+        }
+
+        sharedOrder?.let { order ->
+            div {
+                style = """
+                    background-color: #e8f0fe; border: 1px solid #c6dafc; border-radius: 6px; padding: 10px 14px;
+                    margin-bottom: 12px; font-size: 13px; color: #174ea6; display: flex; gap: 8px; align-items: flex-start;
+                """.trimIndent()
+                span { classes = setOf("mdi", "mdi-package-variant-closed"); style = "font-size: 18px;" }
+                span {
+                    +"Part of an order of ${order.itemCount} items (${formatMoney(order.total)} in all). "
+                    +"The vendor, order details, tax and shipping apply to the whole order; the subtotal is this item's alone."
+                }
             }
         }
 
@@ -184,14 +205,17 @@ class PurchaseFormFields(
                     }
                 }
             }
-            field("Tax") {
-                moneyInput(id("tax-amount"), initial?.taxAmount ?: initial?.let { computeTax(it.subtotal, it.taxRate ?: defaultTaxRate) }) {
+            field(if (sharedOrder != null) "Order tax" else "Tax") {
+                val tax = sharedOrder?.taxAmount
+                    ?: initial?.taxAmount
+                    ?: initial?.let { computeTax(it.subtotal, it.taxRate ?: defaultTaxRate) }
+                moneyInput(id("tax-amount"), tax) {
                     taxAmountEdited = true
                     recalc(recomputeTax = false)
                 }
             }
-            field("Shipping") {
-                moneyInput(id("shipping"), initial?.shipping ?: 0.0) { recalc(recomputeTax = false) }
+            field(if (sharedOrder != null) "Order shipping" else "Shipping") {
+                moneyInput(id("shipping"), sharedOrder?.shipping ?: initial?.shipping ?: 0.0) { recalc(recomputeTax = false) }
             }
         }
 
@@ -207,11 +231,11 @@ class PurchaseFormFields(
                 font-size: 14px;
                 color: #202124;
             """.trimIndent()
-            span { +"Total" }
+            span { +(sharedOrder?.let { "Order total (${it.itemCount} items)" } ?: "Total") }
             span {
                 id = id("total")
                 style = "font-weight: 600; font-size: 18px;"
-                +formatMoney(initial?.total ?: 0.0)
+                +formatMoney(sharedOrder?.total ?: initial?.total ?: 0.0)
             }
         }
 
@@ -257,7 +281,7 @@ class PurchaseFormFields(
     fun hasSubtotal(): Boolean = numberValue(id("subtotal")) != null
 
     private fun recalc(recomputeTax: Boolean = true) {
-        val subtotal = numberValue(id("subtotal")) ?: 0.0
+        val subtotal = roundToCents((numberValue(id("subtotal")) ?: 0.0) + otherItemsSubtotal)
         val rate = (numberValue(id("tax-rate")) ?: (defaultTaxRate * 100)) / 100.0
 
         if (recomputeTax && !taxAmountEdited) {
