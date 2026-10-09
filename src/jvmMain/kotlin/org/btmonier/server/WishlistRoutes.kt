@@ -26,7 +26,7 @@ import org.btmonier.database.TransitionOutcome
 import org.btmonier.database.WishlistDao
 import org.btmonier.storeNameFrom
 import org.btmonier.database.WishlistFilters
-import org.btmonier.database.WishlistSortField
+import org.btmonier.WishlistSortField
 
 /**
  * Response for the wishlist list endpoint. Not paginated: a personal wishlist

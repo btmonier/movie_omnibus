@@ -13,6 +13,7 @@ import org.btmonier.VendorPrice
 import org.btmonier.WishlistItem
 import org.btmonier.WishlistMovie
 import org.btmonier.WishlistPriority
+import org.btmonier.WishlistSortField
 import org.btmonier.WishlistStatus
 import org.btmonier.WishlistSummary
 import org.btmonier.WishlistTransitionRequest
@@ -25,24 +26,6 @@ import org.jetbrains.exposed.sql.statements.UpdateBuilder
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.LocalDateTime
-
-/**
- * How the wishlist should be ordered.
- */
-enum class WishlistSortField(val slug: String) {
-    DATE_ADDED("date_added"),
-    TITLE("title"),
-    PRICE("price"),
-    PERCENT_OFF("percent_off"),
-    PRICE_DROP("price_drop"),
-    RELEASE_DATE("release_date"),
-    PRIORITY("priority");
-
-    companion object {
-        fun fromSlug(slug: String?): WishlistSortField =
-            entries.firstOrNull { it.slug.equals(slug, ignoreCase = true) } ?: DATE_ADDED
-    }
-}
 
 /**
  * Filters applied when listing wishlist items.
@@ -103,7 +86,7 @@ class WishlistDao(
     ): List<WishlistItem> = DatabaseFactory.dbQuery {
         loadItems(WishlistItems.selectAll().toList())
             .filter { matches(it, filters) }
-            .sortedWith(comparator(sortField, ascending))
+            .sortedWith(sortField.comparator(ascending))
     }
 
     suspend fun get(id: Int): WishlistItem? = DatabaseFactory.dbQuery { getInTransaction(id) }
@@ -784,24 +767,6 @@ class WishlistDao(
         if (filters.atTargetOnly && !item.atTarget) return false
         if (filters.inStockOnly && item.inStock != true) return false
         return true
-    }
-
-    private fun comparator(field: WishlistSortField, ascending: Boolean): Comparator<WishlistItem> {
-        val base: Comparator<WishlistItem> = when (field) {
-            WishlistSortField.DATE_ADDED -> compareBy { it.createdAt }
-            WishlistSortField.TITLE -> compareBy(nullsLast()) { it.title?.lowercase() }
-            WishlistSortField.PRICE -> compareBy(nullsLast()) { it.currentPrice }
-            WishlistSortField.PERCENT_OFF -> compareBy(nullsLast()) { it.percentOffList }
-            WishlistSortField.PRICE_DROP -> compareBy(nullsLast()) {
-                val current = it.currentPrice
-                val previous = it.previousPrice
-                if (current != null && previous != null) previous - current else null
-            }
-            WishlistSortField.RELEASE_DATE -> compareBy(nullsLast()) { it.releaseDate }
-            WishlistSortField.PRIORITY -> compareBy { it.priority.ordinal }
-        }
-        val tieBroken = base.thenBy { it.id }
-        return if (ascending) tieBroken else tieBroken.reversed()
     }
 
     private fun bluRayKey(url: String?): String? {
