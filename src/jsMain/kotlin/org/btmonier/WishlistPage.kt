@@ -582,6 +582,11 @@ class WishlistPage(
         val skipped = selected.size - eligible.size
 
         val onDone: (List<WishlistItem>) -> Unit = { updated ->
+            // The step is done with these, so they leave the selection; items it
+            // skipped (or that were taken off the order in the dialog) stay
+            // selected for whatever is next
+            selectedIds.removeAll(updated.mapNotNull { it.id }.toSet())
+            renderSelectionBar()
             reload()
             if (target == WishlistStatus.OWNED) {
                 alertDialog.show(
