@@ -72,7 +72,9 @@ class PurchaseDao {
 
     /**
      * Update an order's shared fields, and the subtotal of each line named in
-     * [order]'s lines by purchase id. Returns null when the order does not exist.
+     * [order]'s lines by purchase id. A line's tracking URL is changed when it
+     * is given (blank clears it) and kept when null. Returns null when the
+     * order does not exist.
      */
     suspend fun updateOrder(id: Int, order: Order): Order? = DatabaseFactory.dbQuery {
         if (Orders.selectAll().where { Orders.id eq id }.empty()) return@dbQuery null
@@ -81,6 +83,7 @@ class PurchaseDao {
             val purchaseId = line.purchaseId ?: return@forEach
             Purchases.update({ (Purchases.id eq purchaseId) and (Purchases.orderId eq id) }) {
                 it[subtotal] = money(line.subtotal.coerceAtLeast(0.0))
+                line.trackingUrl?.let { url -> it[trackingUrl] = url.trim().takeIf(String::isNotEmpty) }
             }
         }
         getOrderInTransaction(id)

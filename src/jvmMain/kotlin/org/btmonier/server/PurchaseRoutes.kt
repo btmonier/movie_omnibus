@@ -89,7 +89,7 @@ fun Route.purchaseRoutes(purchaseDao: PurchaseDao) {
         }
     }
 
-    // PUT /api/orders/{id} - Update the shared fields, and line subtotals named by purchase id
+    // PUT /api/orders/{id} - Update the shared fields, and line subtotals and tracking URLs named by purchase id
     put("/api/orders/{id}") {
         val id = call.parameters["id"]?.toIntOrNull()
         if (id == null) {

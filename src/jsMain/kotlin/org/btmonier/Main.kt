@@ -1147,6 +1147,23 @@ suspend fun createWishlistOrder(request: WishlistOrderRequest): WishlistOrderRes
     return Json.decodeFromString(WishlistOrderResponse.serializer(), response.text().await())
 }
 
+suspend fun fetchOrder(id: Int): Order {
+    val response = window.fetch("$API_BASE_URL/orders/$id").await()
+    if (!response.ok) throw Exception("Failed to fetch the order: ${response.errorMessage()}")
+    return Json.decodeFromString(Order.serializer(), response.text().await())
+}
+
+/** Replace an order's shared fields, and its lines' subtotals and tracking URLs. */
+suspend fun updateOrder(id: Int, order: Order): Order {
+    val response = window.fetch("$API_BASE_URL/orders/$id", RequestInit(
+        method = "PUT",
+        headers = jsonHeaders,
+        body = Json.encodeToString(Order.serializer(), order)
+    )).await()
+    if (!response.ok) throw Exception("Failed to update the order: ${response.errorMessage()}")
+    return Json.decodeFromString(Order.serializer(), response.text().await())
+}
+
 /** Move several items to one status at once; nothing changes if any of them fails. */
 suspend fun bulkTransitionWishlistItems(request: WishlistBulkTransitionRequest): List<WishlistItem> {
     val response = window.fetch("$API_BASE_URL/wishlist/bulk-status", RequestInit(

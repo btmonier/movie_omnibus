@@ -404,7 +404,8 @@ data class Order(
 
 /**
  * One item on an [Order]. [title] is the wishlist item's or release's, for
- * display. Updating an order only reads [purchaseId] and [subtotal].
+ * display. Updating an order only reads [purchaseId], [subtotal] and
+ * [trackingUrl] (null keeps the line's, blank clears it).
  */
 @Serializable
 data class OrderLine(

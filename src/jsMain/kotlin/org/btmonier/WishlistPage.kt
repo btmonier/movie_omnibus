@@ -24,6 +24,7 @@ import org.w3c.dom.HTMLSelectElement
  */
 private enum class GroupBy(val slug: String, val label: String) {
     STATUS("status", "Status"),
+    ORDER("order", "Order / shipment"),
     FORMAT("format", "Format"),
     DISTRIBUTOR("distributor", "Distributor"),
     PRIORITY("priority", "Priority"),
@@ -195,7 +196,9 @@ class WishlistPage(
             onEdit = { openEditForm(it) },
             onAdvance = { current, target -> openStatusDialog(current, target) },
             onDelete = { confirmDelete(it) },
-            onOpenRelease = { releaseId -> ReleaseDetail(container, releaseId = releaseId, onBack = { show() }).show() }
+            onOpenRelease = { releaseId -> ReleaseDetail(container, releaseId = releaseId, onBack = { show() }).show() },
+            // Other items on the order changed too, so the whole list is reloaded
+            onOrderEdited = { reload() }
         )
         openDetail = modal
         modal.show()
@@ -1265,24 +1268,178 @@ class WishlistPage(
                 }
             }
 
-            grouped(visible).forEach { (heading, groupItems) ->
-                if (groupBy != GroupBy.NONE) {
-                    div {
-                        style = "display: flex; align-items: center; gap: 10px; margin: 24px 0 12px 0;"
-                        h2 {
-                            style = "font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 18px; color: #202124; margin: 0; letter-spacing: 0.5px;"
-                            +heading
-                        }
-                        span { style = chipStyle("#f1f3f4", "#5f6368"); +groupItems.size.toString() }
-                        div { style = "flex: 1; height: 1px; background-color: #e8eaed;" }
-                    }
-                }
-                div {
-                    style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
-                    groupItems.forEach { itemCard(it) }
+            div { renderGroups(visible) }
+        }
+    }
+
+    private fun FlowContent.renderGroups(visible: List<WishlistItem>) {
+        if (groupBy == GroupBy.ORDER) {
+            // One band for everything on order, so an order that has partly
+            // shipped stays together, then the rest by status
+            val inFlight = visible.filter { it.status in IN_FLIGHT_STATUSES }
+            if (inFlight.isNotEmpty()) {
+                groupHeading("On order", inFlight.size)
+                orderSections(inFlight)
+            }
+            WISHLIST_STATUS_DISPLAY_ORDER.filter { it !in IN_FLIGHT_STATUSES }.forEach { status ->
+                val rest = visible.filter { it.status == status }
+                if (rest.isNotEmpty()) {
+                    groupHeading(statusLabel(status), rest.size)
+                    cardGrid(rest)
                 }
             }
+            return
         }
+
+        grouped(visible).forEach { (heading, groupItems) ->
+            if (groupBy != GroupBy.NONE) groupHeading(heading, groupItems.size)
+            if (groupBy == GroupBy.STATUS && groupItems.first().status in IN_FLIGHT_STATUSES) {
+                orderSections(groupItems)
+            } else {
+                cardGrid(groupItems)
+            }
+        }
+    }
+
+    private fun FlowContent.groupHeading(heading: String, count: Int) {
+        div {
+            style = "display: flex; align-items: center; gap: 10px; margin: 24px 0 12px 0;"
+            h2 {
+                style = "font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 18px; color: #202124; margin: 0; letter-spacing: 0.5px;"
+                +heading
+            }
+            span { style = chipStyle("#f1f3f4", "#5f6368"); +count.toString() }
+            div { style = "flex: 1; height: 1px; background-color: #e8eaed;" }
+        }
+    }
+
+    private fun FlowContent.cardGrid(groupItems: List<WishlistItem>) {
+        div {
+            style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px;"
+            groupItems.forEach { itemCard(it) }
+        }
+    }
+
+    // --- Orders ---
+
+    /** Items on order, one panel per checkout and, within it, per shipment. */
+    private fun FlowContent.orderSections(groupItems: List<WishlistItem>) {
+        div {
+            style = "display: flex; flex-direction: column; gap: 16px;"
+            groupByOrder(groupItems).forEach { orderPanel(it) }
+        }
+    }
+
+    private fun FlowContent.orderPanel(group: OrderGroup) {
+        div {
+            style = "border: 1px solid #e8eaed; border-radius: 12px; background-color: #fafafa; padding: 14px;"
+
+            div {
+                style = "display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;"
+                span {
+                    classes = setOf("mdi", if (group.hasOrder) "mdi-receipt-text-outline" else "mdi-help-circle-outline")
+                    style = "font-size: 22px; color: #5f6368;"
+                }
+                div {
+                    style = "flex: 1; min-width: 200px;"
+                    div {
+                        style = "font-size: 15px; font-weight: 500; color: #202124; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;"
+                        +orderTitle(group)
+                        if (group.hasOrder && group.orderNumbers.isEmpty()) {
+                            span { style = chipStyle("#fef7e0", "#b06000"); +"No order number" }
+                        }
+                    }
+                    div {
+                        style = "font-size: 12px; color: #5f6368; margin-top: 2px;"
+                        +orderSubtitle(group)
+                    }
+                }
+
+                // With a single box the tracking link belongs in the header;
+                // with several, each shipment below carries its own
+                group.shipments.singleOrNull()?.trackingUrl?.let { trackingLink(it) }
+
+                val ids = group.items.mapNotNull { it.id }
+                if (!selectedIds.containsAll(ids)) {
+                    button {
+                        style = outlineButtonStyle()
+                        attributes["title"] = "Select every item on this order, to mark them shipped or received together"
+                        span { classes = setOf("mdi", "mdi-checkbox-multiple-marked-outline"); style = "font-size: 16px;" }
+                        +"Select"
+                        onClickFunction = { setSelection(ids, true) }
+                    }
+                }
+                if (group.hasOrder) {
+                    button {
+                        style = outlineButtonStyle("#1a73e8")
+                        span { classes = setOf("mdi", "mdi-pencil-outline"); style = "font-size: 16px;" }
+                        +if (group.orderNumbers.isEmpty()) "Add order number" else "Edit order"
+                        onClickFunction = { openOrderEditor(group.orderIds) }
+                    }
+                }
+            }
+
+            if (group.shipments.size > 1) {
+                group.shipments.forEachIndexed { index, shipment ->
+                    div {
+                        style = "display: flex; align-items: center; gap: 8px; margin: ${if (index == 0) "0" else "16px"} 0 8px 0; font-size: 13px; color: #3c4043;"
+                        span {
+                            classes = setOf("mdi", if (shipment.trackingUrl != null) "mdi-truck-outline" else "mdi-package-variant")
+                            style = "font-size: 18px; color: #5f6368;"
+                        }
+                        span {
+                            style = "font-weight: 500;"
+                            +(shipment.trackingUrl?.let { "Shipment ${index + 1}" + (hostOf(it)?.let { host -> " via $host" } ?: "") }
+                                ?: "No tracking yet")
+                        }
+                        span { style = chipStyle("#f1f3f4", "#5f6368"); +shipment.items.size.toString() }
+                        shipment.trackingUrl?.let { trackingLink(it) }
+                    }
+                    cardGrid(shipment.items)
+                }
+            } else {
+                cardGrid(group.items)
+            }
+        }
+    }
+
+    private fun orderTitle(group: OrderGroup): String {
+        if (!group.hasOrder) return "No purchase recorded"
+        val store = group.vendors.joinToString(" / ").ifEmpty { "Unknown store" }
+        return when (group.orderNumbers.size) {
+            0 -> store
+            1 -> "$store · Order #${group.orderNumbers.single().removePrefix("#")}"
+            else -> "$store · Orders " + group.orderNumbers.joinToString(", ") { "#${it.removePrefix("#")}" }
+        }
+    }
+
+    private fun orderSubtitle(group: OrderGroup): String {
+        if (!group.hasOrder) return "${group.items.size} item${if (group.items.size == 1) "" else "s"} marked ordered with nothing paid recorded"
+        val shown = group.items.size
+        return listOfNotNull(
+            group.orderDate?.let { "Ordered ${formatDate(it)}" },
+            "${group.itemCount} item${if (group.itemCount == 1) "" else "s"}" +
+                (if (shown < group.itemCount) " ($shown shown here)" else ""),
+            "${formatMoney(group.total)} total",
+            group.orderIds.size.takeIf { it > 1 }?.let { "recorded as $it separate orders" }
+        ).joinToString(" · ")
+    }
+
+    private fun FlowContent.trackingLink(url: String) {
+        a(href = url, target = "_blank") {
+            attributes["rel"] = "noopener"
+            style = "display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: #1a73e8; text-decoration: none;"
+            span { classes = setOf("mdi", "mdi-truck-fast-outline"); style = "font-size: 16px;" }
+            +"Track"
+        }
+    }
+
+    /** "ups.com" from a tracking URL, for telling shipments apart at a glance. */
+    private fun hostOf(url: String): String? =
+        Regex("^[a-z]+://(?:www\\.)?([^/?#]+)", RegexOption.IGNORE_CASE).find(url.trim())?.groupValues?.get(1)
+
+    private fun openOrderEditor(orderIds: List<Int>) {
+        OrderEditDialog(container, orderIds) { reload() }.show()
     }
 
     /**
@@ -1296,6 +1453,8 @@ class WishlistPage(
             // keeping the sort within each status band
             GroupBy.NONE -> listOf("" to visible.sortedBy { WISHLIST_STATUS_DISPLAY_ORDER.indexOf(it.status) })
             GroupBy.STATUS -> WISHLIST_STATUS_DISPLAY_ORDER.map { s -> statusLabel(s) to visible.filter { it.status == s } }
+            // Sectioned by orderSections, which needs more than a heading per group
+            GroupBy.ORDER -> emptyList()
             GroupBy.PRIORITY -> WishlistPriority.entries.map { p -> "${priorityLabel(p)} priority" to visible.filter { it.priority == p } }
             GroupBy.FORMAT -> {
                 val byFormat = MediaType.entries.map { t -> mediaTypeLabel(t) to visible.filter { t in it.mediaTypes } }

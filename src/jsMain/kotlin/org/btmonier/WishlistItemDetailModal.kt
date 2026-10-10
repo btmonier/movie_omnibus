@@ -25,7 +25,8 @@ class WishlistItemDetailModal(
     private val onEdit: (WishlistItem) -> Unit,
     private val onAdvance: (WishlistItem, WishlistStatus) -> Unit,
     private val onDelete: (WishlistItem) -> Unit,
-    private val onOpenRelease: (Int) -> Unit
+    private val onOpenRelease: (Int) -> Unit,
+    private val onOrderEdited: () -> Unit = {}
 ) {
     private val alertDialog = AlertDialog(container)
     private var isRefreshing = false
@@ -531,7 +532,19 @@ class WishlistItemDetailModal(
                     span { classes = setOf("mdi", "mdi-receipt-text-outline"); style = "color: #1a73e8; font-size: 18px;" }
                     +"Purchase"
                 }
-                span { style = "font-size: 18px; font-weight: 600; color: #202124;"; +formatMoney(purchase.total) }
+                div {
+                    style = "display: flex; align-items: center; gap: 12px;"
+                    purchase.order?.let { order ->
+                        button {
+                            style = outlineButtonStyle("#1a73e8")
+                            attributes["title"] = "Correct the store, date, order number or tracking for everything on this order"
+                            span { classes = setOf("mdi", "mdi-pencil-outline"); style = "font-size: 16px;" }
+                            +if (purchase.orderNumber.isNullOrBlank()) "Add order number" else "Edit order"
+                            onClickFunction = { editOrder(order.id) }
+                        }
+                    }
+                    span { style = "font-size: 18px; font-weight: 600; color: #202124;"; +formatMoney(purchase.total) }
+                }
             }
             div {
                 style = "display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px 16px; font-size: 13px; color: #3c4043;"
@@ -555,6 +568,16 @@ class WishlistItemDetailModal(
                 }
             }
         }
+    }
+
+    private fun editOrder(orderId: Int) {
+        OrderEditDialog(container, listOf(orderId)) {
+            onOrderEdited()
+            val itemId = item.id ?: return@OrderEditDialog
+            mainScope.launch {
+                runCatching { fetchWishlistItem(itemId) }.getOrNull()?.let { update(it) }
+            }
+        }.show()
     }
 
     private fun FlowContent.detail(label: String, value: String) {
