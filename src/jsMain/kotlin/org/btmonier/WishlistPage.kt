@@ -12,11 +12,18 @@ import kotlinx.html.dom.append
 import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
 import kotlinx.html.js.onInputFunction
+import kotlinx.html.js.onMouseDownFunction
+import kotlinx.html.js.onMouseOutFunction
+import kotlinx.html.js.onMouseOverFunction
 import org.w3c.dom.Element
 import org.w3c.dom.HTMLButtonElement
 import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
+import org.w3c.dom.asList
+import org.w3c.dom.events.Event
+import org.w3c.dom.events.KeyboardEvent
+import org.w3c.dom.events.MouseEvent
 
 /**
  * Ways the wishlist can be sectioned on the page. Grouping is done in the
@@ -47,6 +54,32 @@ private const val POLL_INTERVAL_MS = 1000L
 
 private const val SEARCH_INPUT_ID = "wishlist-search-input"
 private const val SELECTION_BAR_ID = "wishlist-selection-bar"
+private const val RESULTS_ID = "wishlist-results"
+private const val SELECT_LINKS_ID = "wishlist-select-links"
+private const val SELECTION_STYLE_ID = "wishlist-selection-style"
+
+private const val CHECKED_ICON = "mdi-checkbox-marked-circle"
+private const val UNCHECKED_ICON = "mdi-checkbox-blank-circle-outline"
+private const val PARTLY_CHECKED_ICON = "mdi-minus-circle"
+
+/**
+ * Hover-revealed checkboxes, as in Google Photos: hidden until the card (or
+ * group heading) is hovered, then shown everywhere once anything is selected.
+ * Devices without hover always show them.
+ */
+private val SELECTION_CSS = """
+    .wl-card { transition: transform 0.15s, box-shadow 0.15s; }
+    .wl-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,0.10); }
+    .wl-card .wl-check { opacity: 0; transition: opacity 0.15s; }
+    .wl-card:hover .wl-check, .wl-card.wl-selected .wl-check, #$RESULTS_ID.wl-selecting .wl-check { opacity: 1; }
+    .wl-card.wl-range-preview { outline: 2px dashed #f48fb1; outline-offset: 2px; }
+    .wl-group-check.wl-none { opacity: 0; transition: opacity 0.15s; }
+    .wl-group-head:hover .wl-group-check, #$RESULTS_ID.wl-selecting .wl-group-check { opacity: 1; }
+    @media (hover: none) { .wl-card .wl-check, .wl-group-check.wl-none { opacity: 1; } }
+""".trimIndent()
+
+/** Removes the key listeners of whichever wishlist page last installed them. */
+private var removeActiveKeyListeners: (() -> Unit)? = null
 
 /**
  * The wishlist: physical releases you want, imported from blu-ray.com with
@@ -82,6 +115,12 @@ class WishlistPage(
     private var budgetResult: BudgetPickResult? = null
 
     private val selectedIds = mutableSetOf<Int>()
+    /** Item ids in the order their cards are drawn; a card's `data-pos` indexes it. */
+    private val renderOrder = mutableListOf<Int>()
+    /** Where the next Shift+click range starts: the last card clicked. */
+    private var anchorPos: Int? = null
+    private var hoverPos: Int? = null
+    private var shiftHeld = false
 
     private var mediaTypeOptions: List<String> = emptyList()
     private var distributorOptions: List<String> = emptyList()
@@ -96,7 +135,9 @@ class WishlistPage(
     private var openDetail: WishlistItemDetailModal? = null
 
     fun show() {
+        ensureSelectionStyles()
         render()
+        installKeyListeners()
         mainScope.launch {
             // The tax rate is only needed once a status dialog opens, so it is
             // fetched alongside the wishlist rather than ahead of it
@@ -469,7 +510,7 @@ class WishlistPage(
                 div { id = "wishlist-summary"; style = "margin: 20px 0 24px 0;" }
                 div { id = "wishlist-budget"; style = "margin-bottom: 24px;" }
                 renderFilters()
-                div { id = "wishlist-results" }
+                div { id = RESULTS_ID }
                 div { id = SELECTION_BAR_ID; style = "position: sticky; bottom: 16px; z-index: 900; margin-top: 24px;" }
             }
         }
@@ -484,22 +525,218 @@ class WishlistPage(
     private fun cardBorder(selected: Boolean): String =
         if (selected) "2px solid #e91e63" else "1px solid #e8eaed"
 
-    /**
-     * Patches just the one card and the bar, so ticking a box does not rebuild
-     * the grid under the cursor.
-     */
-    private fun toggleSelection(item: WishlistItem, selected: Boolean) {
-        val id = item.id ?: return
-        if (selected) selectedIds.add(id) else selectedIds.remove(id)
-        (document.getElementById("wishlist-card-$id") as? HTMLElement)?.style?.border = cardBorder(selected)
+    private fun setSelection(ids: Collection<Int>, selected: Boolean) {
+        if (selected) selectedIds.addAll(ids) else selectedIds.removeAll(ids.toSet())
+        refreshSelectionVisuals()
         renderSelectionBar()
     }
 
-    private fun setSelection(ids: Collection<Int>, selected: Boolean) {
-        if (selected) selectedIds.addAll(ids) else selectedIds.removeAll(ids.toSet())
-        renderResults()
+    /**
+     * A click on a card's checkbox or body. Shift+click extends from the last
+     * card clicked; once anything is selected, or with Ctrl/Cmd held, a click
+     * on the body toggles the card instead of opening it.
+     */
+    private fun onCardClick(item: WishlistItem, pos: Int, event: MouseEvent, onCheckbox: Boolean) {
+        val id = item.id ?: return
+        val anchor = anchorPos
+        when {
+            event.shiftKey && anchor != null -> {
+                val updated = applyRange(selectedIds, renderOrder, anchor, pos)
+                selectedIds.clear()
+                selectedIds.addAll(updated)
+            }
+            onCheckbox || event.shiftKey || selectedIds.isNotEmpty() || event.ctrlKey || event.metaKey -> {
+                if (!selectedIds.remove(id)) selectedIds.add(id)
+                anchorPos = pos
+            }
+            else -> {
+                openDetailFor(item)
+                return
+            }
+        }
+        refreshSelectionVisuals()
         renderSelectionBar()
+        updateRangePreview()
     }
+
+    /**
+     * Brings every card copy, group checkbox and the select links in line with
+     * [selectedIds] without rebuilding the grid under the cursor.
+     */
+    private fun refreshSelectionVisuals() {
+        if (selectedIds.isEmpty()) anchorPos = null
+        val results = document.getElementById(RESULTS_ID) ?: return
+        results.classList.toggle("wl-selecting", selectedIds.isNotEmpty())
+
+        results.querySelectorAll(".wl-card").asList().forEach { node ->
+            val card = node as? HTMLElement ?: return@forEach
+            val selected = card.getAttribute("data-item-id")?.toIntOrNull() in selectedIds
+            card.classList.toggle("wl-selected", selected)
+            card.style.border = cardBorder(selected)
+            (card.querySelector(".wl-check") as? HTMLElement)?.let { check ->
+                check.setAttribute("aria-checked", selected.toString())
+                (check.querySelector(".mdi") as? HTMLElement)?.let { icon ->
+                    icon.className = "mdi ${if (selected) CHECKED_ICON else UNCHECKED_ICON}"
+                    icon.style.color = if (selected) "#e91e63" else "#5f6368"
+                }
+            }
+        }
+
+        results.querySelectorAll(".wl-group-check").asList().forEach { node ->
+            val check = node as? HTMLElement ?: return@forEach
+            val ids = check.getAttribute("data-group-ids").orEmpty().split(",").mapNotNull { it.toIntOrNull() }
+            styleGroupCheck(check, ids)
+        }
+
+        renderSelectLinks()
+    }
+
+    private fun groupCheckState(ids: List<Int>): Boolean? = when {
+        ids.isNotEmpty() && selectedIds.containsAll(ids) -> true
+        ids.none { it in selectedIds } -> false
+        else -> null
+    }
+
+    private fun styleGroupCheck(check: HTMLElement, ids: List<Int>) {
+        val state = groupCheckState(ids)
+        val icon = when (state) { true -> CHECKED_ICON; false -> UNCHECKED_ICON; null -> PARTLY_CHECKED_ICON }
+        check.className = "wl-group-check mdi $icon" + if (state == false) " wl-none" else ""
+        check.style.color = if (state == false) "#5f6368" else "#e91e63"
+        check.setAttribute("aria-checked", when (state) { true -> "true"; false -> "false"; null -> "mixed" })
+        check.setAttribute("title", if (state == true) "Clear these ${ids.size}" else "Select all ${ids.size}")
+    }
+
+    /** A round checkbox that selects or clears a whole group, Google Photos style. */
+    private fun FlowContent.groupCheck(ids: List<Int>) {
+        if (ids.isEmpty()) return
+        span {
+            classes = setOf("wl-group-check", "mdi", UNCHECKED_ICON)
+            style = "font-size: 22px; cursor: pointer; line-height: 1;"
+            attributes["role"] = "checkbox"
+            attributes["data-group-ids"] = ids.joinToString(",")
+            onClickFunction = { event ->
+                event.stopPropagation()
+                setSelection(ids, groupCheckState(ids) != true)
+            }
+        }
+    }
+
+    /** Outlines the cards a Shift+click on the hovered card would change. */
+    private fun updateRangePreview() {
+        val anchor = anchorPos
+        val hover = hoverPos
+        val range = if (shiftHeld && anchor != null && hover != null) minOf(anchor, hover)..maxOf(anchor, hover) else null
+        val results = document.getElementById(RESULTS_ID) ?: return
+        results.querySelectorAll(".wl-card").asList().forEach { node ->
+            val card = node as? HTMLElement ?: return@forEach
+            val pos = card.getAttribute("data-pos")?.toIntOrNull()
+            card.classList.toggle("wl-range-preview", range != null && pos != null && pos in range)
+        }
+    }
+
+    private fun renderSelectLinks() {
+        val target = document.getElementById(SELECT_LINKS_ID) ?: return
+        target.innerHTML = ""
+        val visibleIds = visibleItems().mapNotNull { it.id }
+        val linkStyle = "background: none; border: none; padding: 0; color: #1a73e8; cursor: pointer; font-size: 14px;"
+        target.append {
+            if (!selectedIds.containsAll(visibleIds)) {
+                button {
+                    style = linkStyle
+                    attributes["title"] = "Ctrl+A"
+                    +"Select all shown"
+                    onClickFunction = { setSelection(visibleIds, true) }
+                }
+            }
+            if (selectedIds.isNotEmpty()) {
+                button {
+                    style = linkStyle
+                    attributes["title"] = "Esc"
+                    +"Clear selection"
+                    onClickFunction = { setSelection(selectedIds.toList(), false) }
+                }
+            }
+        }
+    }
+
+    private fun ensureSelectionStyles() {
+        if (document.getElementById(SELECTION_STYLE_ID) != null) return
+        val style = document.createElement("style")
+        style.id = SELECTION_STYLE_ID
+        style.textContent = SELECTION_CSS
+        document.head?.appendChild(style)
+    }
+
+    // --- Keyboard ---
+
+    /**
+     * Esc clears, Ctrl/Cmd+A selects everything shown, Ctrl/Cmd+Shift+A clears,
+     * and Shift held previews a range. Navigating away only re-renders the
+     * container, so the listeners take themselves off once this page's results
+     * are gone, and a newly shown page replaces any left behind.
+     */
+    private fun installKeyListeners() {
+        removeActiveKeyListeners?.invoke()
+
+        lateinit var remove: () -> Unit
+        fun onPage(): Boolean = (document.getElementById(RESULTS_ID)?.let { container.contains(it) } == true).also {
+            if (!it) remove()
+        }
+
+        val keyDown: (Event) -> Unit = handler@{ event ->
+            if (!onPage()) return@handler
+            val key = event as? KeyboardEvent ?: return@handler
+            if (key.key == "Shift") {
+                if (!shiftHeld) { shiftHeld = true; updateRangePreview() }
+                return@handler
+            }
+            if (isTyping() || isModalOpen()) return@handler
+            val mod = key.ctrlKey || key.metaKey
+            when {
+                key.key == "Escape" && selectedIds.isNotEmpty() -> {
+                    setSelection(selectedIds.toList(), false)
+                }
+                mod && key.key.lowercase() == "a" && key.shiftKey -> {
+                    key.preventDefault()
+                    setSelection(selectedIds.toList(), false)
+                }
+                mod && key.key.lowercase() == "a" -> {
+                    key.preventDefault()
+                    setSelection(visibleItems().mapNotNull { it.id }, true)
+                }
+            }
+        }
+        val keyUp: (Event) -> Unit = handler@{ event ->
+            if (!onPage()) return@handler
+            if ((event as? KeyboardEvent)?.key == "Shift") releaseShift()
+        }
+        val blur: (Event) -> Unit = { if (onPage()) releaseShift() }
+
+        remove = {
+            window.removeEventListener("keydown", keyDown)
+            window.removeEventListener("keyup", keyUp)
+            window.removeEventListener("blur", blur)
+            if (removeActiveKeyListeners === remove) removeActiveKeyListeners = null
+        }
+        window.addEventListener("keydown", keyDown)
+        window.addEventListener("keyup", keyUp)
+        window.addEventListener("blur", blur)
+        removeActiveKeyListeners = remove
+    }
+
+    private fun releaseShift() {
+        if (!shiftHeld) return
+        shiftHeld = false
+        updateRangePreview()
+    }
+
+    private fun isTyping(): Boolean {
+        val active = document.activeElement as? HTMLElement ?: return false
+        return active.tagName in setOf("INPUT", "SELECT", "TEXTAREA") || active.isContentEditable
+    }
+
+    /** Every dialog and overlay in the app is a fixed-position layer over the page. */
+    private fun isModalOpen(): Boolean = document.querySelector("[style*='position: fixed']") != null
 
     private fun renderSelectionBar() {
         val target = document.getElementById(SELECTION_BAR_ID) ?: return
@@ -531,6 +768,10 @@ class WishlistPage(
                     div {
                         style = "font-size: 12px; color: #bdc1c6; margin-top: 2px;"
                         +"About ${formatMoney(total + computeTax(total, defaultTaxRate))} with ${formatPercent(defaultTaxRate)} tax, before shipping."
+                    }
+                    div {
+                        style = "font-size: 11px; color: #9aa0a6; margin-top: 4px;"
+                        +"Shift+click to select a range · Ctrl+A to select all shown · Esc to clear"
                     }
                 }
                 button {
@@ -1210,8 +1451,11 @@ class WishlistPage(
     private fun visibleItems(): List<WishlistItem> = items.filter { it.status in selectedStatuses }
 
     private fun renderResults() {
-        val results = document.getElementById("wishlist-results") ?: return
+        val results = document.getElementById(RESULTS_ID) ?: return
         results.innerHTML = ""
+        val previousOrder = renderOrder.toList()
+        renderOrder.clear()
+        hoverPos = null
 
         results.append {
             // Only take over the page on the first load; a reload keeps the
@@ -1245,22 +1489,7 @@ class WishlistPage(
                 span {
                     style = "display: inline-flex; align-items: center; gap: 12px; flex-wrap: wrap;"
                     span { +"${visible.size} item${if (visible.size == 1) "" else "s"}" }
-                    val visibleIds = visible.mapNotNull { it.id }
-                    val linkStyle = "background: none; border: none; padding: 0; color: #1a73e8; cursor: pointer; font-size: 14px;"
-                    if (!selectedIds.containsAll(visibleIds)) {
-                        button {
-                            style = linkStyle
-                            +"Select all shown"
-                            onClickFunction = { setSelection(visibleIds, true) }
-                        }
-                    }
-                    if (selectedIds.isNotEmpty()) {
-                        button {
-                            style = linkStyle
-                            +"Clear selection"
-                            onClickFunction = { setSelection(selectedIds.toList(), false) }
-                        }
-                    }
+                    span { id = SELECT_LINKS_ID; style = "display: inline-flex; gap: 12px;" }
                 }
                 // The refresh pass has a bar of its own above; this is only for
                 // the list reloading
@@ -1275,6 +1504,11 @@ class WishlistPage(
 
             div { renderGroups(visible) }
         }
+
+        // A range only means something against the cards it was started on
+        if (renderOrder != previousOrder) anchorPos = null
+        refreshSelectionVisuals()
+        updateRangePreview()
     }
 
     private fun FlowContent.renderGroups(visible: List<WishlistItem>) {
@@ -1284,13 +1518,13 @@ class WishlistPage(
             val inFlight = visible.filter { it.status in IN_FLIGHT_STATUSES }
                 .sortedBy { WISHLIST_STATUS_DISPLAY_ORDER.indexOf(it.status) }
             if (inFlight.isNotEmpty()) {
-                groupHeading("On order", inFlight.size)
+                groupHeading("On order", inFlight)
                 orderSections(inFlight)
             }
             WISHLIST_STATUS_DISPLAY_ORDER.filter { it !in IN_FLIGHT_STATUSES }.forEach { status ->
                 val rest = visible.filter { it.status == status }
                 if (rest.isNotEmpty()) {
-                    groupHeading(statusLabel(status), rest.size)
+                    groupHeading(statusLabel(status), rest)
                     cardGrid(rest)
                 }
             }
@@ -1298,7 +1532,7 @@ class WishlistPage(
         }
 
         grouped(visible).forEach { (heading, groupItems) ->
-            if (groupBy != GroupBy.NONE) groupHeading(heading, groupItems.size)
+            if (groupBy != GroupBy.NONE) groupHeading(heading, groupItems)
             if (groupBy == GroupBy.STATUS && groupItems.first().status in IN_FLIGHT_STATUSES) {
                 orderSections(groupItems)
             } else {
@@ -1307,9 +1541,12 @@ class WishlistPage(
         }
     }
 
-    private fun FlowContent.groupHeading(heading: String, count: Int) {
+    private fun FlowContent.groupHeading(heading: String, groupItems: List<WishlistItem>) {
+        val count = groupItems.size
         div {
+            classes = setOf("wl-group-head")
             style = "display: flex; align-items: center; gap: 10px; margin: 24px 0 12px 0;"
+            groupCheck(groupItems.mapNotNull { it.id }.distinct())
             h2 {
                 style = "font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 18px; color: #202124; margin: 0; letter-spacing: 0.5px;"
                 +heading
@@ -1341,7 +1578,9 @@ class WishlistPage(
             style = "border: 1px solid #e8eaed; border-radius: 12px; background-color: #fafafa; padding: 14px;"
 
             div {
+                classes = setOf("wl-group-head")
                 style = "display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px;"
+                groupCheck(group.items.mapNotNull { it.id })
                 span {
                     classes = setOf("mdi", if (group.hasOrder) "mdi-receipt-text-outline" else "mdi-help-circle-outline")
                     style = "font-size: 22px; color: #5f6368;"
@@ -1365,16 +1604,6 @@ class WishlistPage(
                 // with several, each shipment below carries its own
                 group.shipments.singleOrNull()?.trackingUrl?.let { trackingLink(it) }
 
-                val ids = group.items.mapNotNull { it.id }
-                if (!selectedIds.containsAll(ids)) {
-                    button {
-                        style = outlineButtonStyle()
-                        attributes["title"] = "Select every item on this order, to mark them shipped or received together"
-                        span { classes = setOf("mdi", "mdi-checkbox-multiple-marked-outline"); style = "font-size: 16px;" }
-                        +"Select"
-                        onClickFunction = { setSelection(ids, true) }
-                    }
-                }
                 if (group.hasOrder) {
                     button {
                         style = outlineButtonStyle("#1a73e8")
@@ -1388,7 +1617,9 @@ class WishlistPage(
             if (group.shipments.size > 1) {
                 group.shipments.forEachIndexed { index, shipment ->
                     div {
+                        classes = setOf("wl-group-head")
                         style = "display: flex; align-items: center; gap: 8px; margin: ${if (index == 0) "0" else "16px"} 0 8px 0; font-size: 13px; color: #3c4043;"
+                        groupCheck(shipment.items.mapNotNull { it.id })
                         span {
                             classes = setOf("mdi", if (shipment.trackingUrl != null) "mdi-truck-outline" else "mdi-package-variant")
                             style = "font-size: 18px; color: #5f6368;"
@@ -1484,18 +1715,37 @@ class WishlistPage(
 
     private fun FlowContent.itemCard(item: WishlistItem) {
         val isSelected = item.id in selectedIds
+        val pos = item.id?.let { renderOrder.add(it); renderOrder.lastIndex }
         div {
-            item.id?.let { id = "wishlist-card-$it" }
+            classes = setOfNotNull("wl-card", if (isSelected) "wl-selected" else null)
+            item.id?.let { attributes["data-item-id"] = it.toString() }
+            pos?.let { attributes["data-pos"] = it.toString() }
             style = """
                 background-color: white; border: ${cardBorder(isSelected)}; border-radius: 12px; overflow: hidden;
-                display: flex; flex-direction: column; transition: transform 0.15s, box-shadow 0.15s;
+                display: flex; flex-direction: column;
             """.trimIndent()
-            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 20px rgba(0,0,0,0.10)'"
-            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='none'"
+            if (pos != null) {
+                onMouseOverFunction = { event ->
+                    shiftHeld = (event as MouseEvent).shiftKey
+                    if (hoverPos != pos) { hoverPos = pos; updateRangePreview() }
+                }
+                onMouseOutFunction = { event ->
+                    val into = (event as MouseEvent).relatedTarget as? org.w3c.dom.Node
+                    val card = event.currentTarget as? HTMLElement
+                    if (into == null || card?.contains(into) != true) {
+                        hoverPos = null
+                        updateRangePreview()
+                    }
+                }
+            }
 
             div {
                 style = "display: flex; gap: 14px; padding: 14px; cursor: pointer; flex: 1;"
-                onClickFunction = { openDetailFor(item) }
+                // Keeps Shift+click from selecting the text between cards
+                onMouseDownFunction = { event -> if ((event as MouseEvent).shiftKey) event.preventDefault() }
+                onClickFunction = { event ->
+                    if (pos != null) onCardClick(item, pos, event as MouseEvent, onCheckbox = false) else openDetailFor(item)
+                }
 
                 div {
                     style = "width: 90px; height: 120px; flex-shrink: 0; background-color: #f1f3f4; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative;"
@@ -1517,21 +1767,24 @@ class WishlistPage(
                             attributes["title"] = "High priority"
                         }
                     }
-                    if (item.id != null) {
-                        label {
+                    if (pos != null) {
+                        span {
+                            classes = setOf("wl-check")
                             style = """
-                                position: absolute; top: 2px; right: 2px; padding: 4px; display: flex;
-                                background-color: rgba(255,255,255,0.85); border-radius: 4px; cursor: pointer;
+                                position: absolute; top: 2px; right: 2px; display: flex; line-height: 1;
+                                background-color: rgba(255,255,255,0.9); border-radius: 50%; cursor: pointer;
                             """.trimIndent()
-                            attributes["title"] = "Select to total up and open purchase links"
-                            // Keeps the click from also opening the detail view
-                            onClickFunction = { it.stopPropagation() }
-                            input(type = InputType.checkBox) {
-                                checked = isSelected
-                                style = "margin: 0; width: 16px; height: 16px; cursor: pointer; accent-color: #e91e63;"
-                                onChangeFunction = { event ->
-                                    toggleSelection(item, (event.target as HTMLInputElement).checked)
-                                }
+                            attributes["role"] = "checkbox"
+                            attributes["aria-checked"] = isSelected.toString()
+                            attributes["title"] = "Select to total up and open purchase links (Shift+click for a range)"
+                            onClickFunction = { event ->
+                                // Keeps the click from also reaching the card body
+                                event.stopPropagation()
+                                onCardClick(item, pos, event as MouseEvent, onCheckbox = true)
+                            }
+                            span {
+                                classes = setOf("mdi", if (isSelected) CHECKED_ICON else UNCHECKED_ICON)
+                                style = "font-size: 22px; color: ${if (isSelected) "#e91e63" else "#5f6368"};"
                             }
                         }
                     }
