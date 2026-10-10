@@ -1277,6 +1277,7 @@ class WishlistPage(
             // One band for everything on order, so an order that has partly
             // shipped stays together, then the rest by status
             val inFlight = visible.filter { it.status in IN_FLIGHT_STATUSES }
+                .sortedBy { WISHLIST_STATUS_DISPLAY_ORDER.indexOf(it.status) }
             if (inFlight.isNotEmpty()) {
                 groupHeading("On order", inFlight.size)
                 orderSections(inFlight)

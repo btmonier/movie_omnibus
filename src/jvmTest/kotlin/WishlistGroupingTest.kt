@@ -78,7 +78,7 @@ class WishlistGroupingTest {
     @Test
     fun `things already paid for are shown above things still wanted`() {
         assertEquals(
-            listOf(WishlistStatus.ORDERED, WishlistStatus.SHIPPED, WishlistStatus.WISHLIST, WishlistStatus.OWNED),
+            listOf(WishlistStatus.SHIPPED, WishlistStatus.ORDERED, WishlistStatus.WISHLIST, WishlistStatus.OWNED),
             WISHLIST_STATUS_DISPLAY_ORDER
         )
         // Every status has a place, or grouping by status would drop items

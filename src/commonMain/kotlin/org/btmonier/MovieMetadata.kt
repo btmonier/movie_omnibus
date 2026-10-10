@@ -194,12 +194,13 @@ enum class WishlistStatus {
 
 /**
  * The order statuses are shown in, as opposed to the order they happen in.
- * Anything already paid for is what you want to see first, so ordered and
- * shipped items sit above the things still only wanted.
+ * Anything already paid for is what you want to see first, so shipped and
+ * ordered items sit above the things still only wanted - shipped first, as
+ * the next to arrive.
  */
 val WISHLIST_STATUS_DISPLAY_ORDER: List<WishlistStatus> = listOf(
-    WishlistStatus.ORDERED,
     WishlistStatus.SHIPPED,
+    WishlistStatus.ORDERED,
     WishlistStatus.WISHLIST,
     WishlistStatus.OWNED
 )
