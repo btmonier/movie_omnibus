@@ -146,7 +146,7 @@ fun TagConsumer<*>.appNavbar(
             div {
                 style = "display: flex; flex-wrap: wrap; align-items: center; gap: 8px;"
 
-                NavSection.entries.forEach { section ->
+                NavSection.entries.sortedBy { it.label }.forEach { section ->
                     navButton(section, isActive = section == active) {
                         navigate(section, active, onSubpage)
                     }

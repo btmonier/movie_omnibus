@@ -13,7 +13,10 @@ private const val LABEL_ID = "pm-progress-label"
 private const val PERCENT_ID = "pm-progress-percent"
 
 /** Half the rendered width of the Cameron figure, used to keep him on the track at 0% and 100%. */
-private const val CAMERON_HALF_WIDTH_PX = 22
+private const val CAMERON_HALF_WIDTH_PX = 16
+
+private const val CAMERON_HEIGHT_PX = 38
+private const val CAMERON_TRACK_PADDING_TOP_PX = 34
 
 /** Keeps the figure centered on the fill edge without letting him hang off either end. */
 private fun cameronLeft(percent: Double): String =
@@ -60,7 +63,7 @@ fun FlowContent.physicalMediaProgressMeter() {
 
         // Track wrapper - the top padding reserves headroom for the figure
         div {
-            style = "position: relative; padding-top: 46px;"
+            style = "position: relative; padding-top: ${CAMERON_TRACK_PADDING_TOP_PX}px;"
 
             div {
                 id = TRACK_ID
@@ -88,7 +91,7 @@ fun FlowContent.physicalMediaProgressMeter() {
                     position: absolute;
                     bottom: 5px;
                     left: ${cameronLeft(0.0)};
-                    height: 52px;
+                    height: ${CAMERON_HEIGHT_PX}px;
                     transform: translateX(-50%);
                     transition: left 700ms ease;
                     pointer-events: none;

@@ -105,7 +105,24 @@ class MovieTable(private val container: Element) {
 
             // Main content
             div {
-                style = "max-width: 1400px; margin: 0 auto; padding: 24px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
+                style = "max-width: 1400px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
+
+                div {
+                    style = "margin-bottom: 8px;"
+                    h1 {
+                        style = "font-family: 'Oswald', sans-serif; font-weight: 500; color: #202124; font-size: 28px; margin: 0; display: flex; align-items: center; gap: 12px; letter-spacing: 1px;"
+                        span {
+                            classes = setOf("mdi", NavSection.COLLECTION.icon)
+                            style = "font-size: 32px; color: #1a73e8;"
+                        }
+                        +NavSection.COLLECTION.label
+                    }
+                }
+
+                p {
+                    style = "color: #5f6368; font-size: 15px; margin: 0 0 24px 0; line-height: 1.6;"
+                    +"Your full film catalog in one place. Search, filter, and open any title to view or edit its metadata."
+                }
 
                 // Physical media collection progress
                 physicalMediaProgressMeter()
