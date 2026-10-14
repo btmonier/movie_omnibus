@@ -11,10 +11,7 @@ import org.w3c.dom.*
 /**
  * Random movie picker page that selects an unwatched movie with optional filters.
  */
-class RandomMoviePicker(
-    private val container: Element,
-    private val onBack: () -> Unit
-) {
+class RandomMoviePicker(private val container: Element) {
     // Multi-select filter state
     private var selectedGenres: MutableSet<String> = mutableSetOf()
     private var selectedSubgenres: MutableSet<String> = mutableSetOf()
@@ -62,86 +59,8 @@ class RandomMoviePicker(
     private fun render() {
         container.innerHTML = ""
         container.append {
-            // Navbar
-            nav {
-                style = """
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-                    padding: 0 24px;
-                """.trimIndent()
-                
-                div {
-                    style = """
-                        max-width: 1400px;
-                        margin: 0 auto;
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        height: 64px;
-                    """.trimIndent()
-                    
-                    // Logo/Title (clickable to go back)
-                    div {
-                        style = """
-                            display: flex;
-                            align-items: center;
-                            gap: 12px;
-                            cursor: pointer;
-                        """.trimIndent()
-                        onClickFunction = {
-                            onBack()
-                        }
-                        
-                        span {
-                            classes = setOf("mdi", "mdi-movie-open")
-                            style = "font-size: 28px; color: #ffffff;"
-                        }
-                        h1 {
-                            style = """
-                                font-family: 'Oswald', sans-serif;
-                                font-weight: 500;
-                                font-size: 24px;
-                                color: #ffffff;
-                                margin: 0;
-                                letter-spacing: 1px;
-                            """.trimIndent()
-                            +"The Movie Omnibus"
-                        }
-                    }
-                    
-                    // Nav links
-                    div {
-                        style = "display: flex; align-items: center; gap: 8px;"
-                        
-                        // Random button (active state)
-                        a {
-                            style = """
-                                display: flex;
-                                align-items: center;
-                                gap: 6px;
-                                padding: 10px 16px;
-                                font-size: 14px;
-                                font-weight: 500;
-                                cursor: pointer;
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                text-decoration: none;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-                            """.trimIndent()
-                            span {
-                                classes = setOf("mdi", "mdi-dice-multiple")
-                                style = "font-size: 18px;"
-                            }
-                            span { +"Random" }
-                        }
-                    }
-                }
-            }
+            // The filter options are categories, so a rename re-reads them
+            appNavbar(NavSection.RANDOM, onCategoriesClosed = { show() })
 
             // Main content
             div {

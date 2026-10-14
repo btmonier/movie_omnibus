@@ -21,10 +21,9 @@ const val API_BASE_URL = "http://localhost:8080/api"
 fun main() {
     mainScope.launch {
         try {
-            // Initialize the movie table - it will load data itself
+            // Opens on the collection, which loads its data itself
             val root = document.getElementById("root") ?: error("Couldn't find root container!")
-            val movieTable = MovieTable(root)
-            movieTable.render()
+            AppNav.start(root)
         } catch (e: Exception) {
             console.error("Error loading movie data:", e)
             val root = document.getElementById("root")

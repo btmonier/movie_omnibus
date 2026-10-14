@@ -57,7 +57,6 @@ class MovieTable(private val container: Element) {
     private var collectionDropdownOpen = false
     private var countryDropdownOpen = false
     private var mediaTypeDropdownOpen = false
-    private var editToolsDropdownOpen = false
     private var sortDropdownOpen = false
 
     // Dropdown search text
@@ -102,277 +101,8 @@ class MovieTable(private val container: Element) {
     fun render() {
         container.innerHTML = ""
         container.append {
-            // Navbar
-            nav {
-                style = """
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-                    padding: 0 24px;
-                """.trimIndent()
-                
-                div {
-                    style = """
-                        max-width: 1400px;
-                        margin: 0 auto;
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        height: 64px;
-                    """.trimIndent()
-                    
-                    // Logo/Title
-                    div {
-                        style = """
-                            display: flex;
-                            align-items: center;
-                            gap: 12px;
-                            cursor: pointer;
-                        """.trimIndent()
-                        onClickFunction = {
-                            // Scroll to top or reset view
-                            kotlinx.browser.window.scrollTo(0.0, 0.0)
-                        }
-                        
-                        span {
-                            classes = setOf("mdi", "mdi-movie-open")
-                            style = "font-size: 28px; color: #ffffff;"
-                        }
-                        h1 {
-                            style = """
-                                font-family: 'Oswald', sans-serif;
-                                font-weight: 500;
-                                font-size: 24px;
-                                color: #ffffff;
-                                margin: 0;
-                                letter-spacing: 1px;
-                            """.trimIndent()
-                            +"The Movie Omnibus"
-                        }
-                    }
-                    
-                    // Nav links
-                    div {
-                        style = "display: flex; align-items: center; gap: 8px;"
+            appNavbar(NavSection.COLLECTION, onCategoriesClosed = { refreshAfterCategoryEdit() })
 
-                        // Releases button
-                        a {
-                            style = """
-                                display: flex;
-                                align-items: center;
-                                gap: 6px;
-                                padding: 10px 16px;
-                                font-size: 14px;
-                                font-weight: 500;
-                                cursor: pointer;
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                text-decoration: none;
-                                transition: transform 0.2s, box-shadow 0.2s;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.5)'"
-                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.4)'"
-                            onClickFunction = { e ->
-                                e.preventDefault()
-                                showReleaseBrowser()
-                            }
-                            span {
-                                classes = setOf("mdi", "mdi-package-variant-closed")
-                                style = "font-size: 18px;"
-                            }
-                            span { +"Releases" }
-                        }
-
-                        // Wishlist button
-                        a {
-                            style = """
-                                display: flex;
-                                align-items: center;
-                                gap: 6px;
-                                padding: 10px 16px;
-                                font-size: 14px;
-                                font-weight: 500;
-                                cursor: pointer;
-                                background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                text-decoration: none;
-                                transition: transform 0.2s, box-shadow 0.2s;
-                                box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(233, 30, 99, 0.5)'"
-                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(233, 30, 99, 0.4)'"
-                            onClickFunction = { e ->
-                                e.preventDefault()
-                                showWishlist()
-                            }
-                            span {
-                                classes = setOf("mdi", "mdi-heart-outline")
-                                style = "font-size: 18px;"
-                            }
-                            span { +"Wishlist" }
-                        }
-
-                        // Random button
-                        a {
-                            style = """
-                                display: flex;
-                                align-items: center;
-                                gap: 6px;
-                                padding: 10px 16px;
-                                font-size: 14px;
-                                font-weight: 500;
-                                cursor: pointer;
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                text-decoration: none;
-                                transition: transform 0.2s, box-shadow 0.2s;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-                            """.trimIndent()
-                            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 16px rgba(102, 126, 234, 0.5)'"
-                            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(102, 126, 234, 0.4)'"
-                            onClickFunction = { e ->
-                                e.preventDefault()
-                                showRandomPicker()
-                            }
-                            span {
-                                classes = setOf("mdi", "mdi-dice-multiple")
-                                style = "font-size: 18px;"
-                            }
-                            span { +"Random" }
-                        }
-                        
-                        // Edit Tools dropdown
-                        div {
-                            id = "edit-tools-dropdown"
-                            style = "position: relative;"
-                            
-                            // Dropdown trigger button
-                            a {
-                                style = """
-                                    display: flex;
-                                    align-items: center;
-                                    gap: 6px;
-                                    padding: 10px 16px;
-                                    font-size: 14px;
-                                    font-weight: 500;
-                                    cursor: pointer;
-                                    background-color: transparent;
-                                    color: #e0e0e0;
-                                    border: 1px solid rgba(255,255,255,0.2);
-                                    border-radius: 6px;
-                                    text-decoration: none;
-                                    transition: all 0.2s;
-                                """.trimIndent()
-                                attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.borderColor='rgba(255,255,255,0.4)'; this.style.color='#ffffff'"
-                                attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.borderColor='rgba(255,255,255,0.2)'; this.style.color='#e0e0e0'"
-                                onClickFunction = { e ->
-                                    e.preventDefault()
-                                    e.stopPropagation()
-                                    editToolsDropdownOpen = !editToolsDropdownOpen
-                                    updateEditToolsDropdown()
-                                }
-                                span {
-                                    classes = setOf("mdi", "mdi-wrench")
-                                    style = "font-size: 18px;"
-                                }
-                                span { +"Editor Tools" }
-                                span {
-                                    classes = setOf("mdi", "mdi-chevron-down")
-                                    style = "font-size: 16px; margin-left: 2px;"
-                                }
-                            }
-                            
-                            // Dropdown menu (hidden by default)
-                            div {
-                                id = "edit-tools-menu"
-                                style = """
-                                    display: none;
-                                    position: absolute;
-                                    top: 100%;
-                                    right: 0;
-                                    margin-top: 8px;
-                                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                                    border: 1px solid rgba(255,255,255,0.15);
-                                    border-radius: 8px;
-                                    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-                                    min-width: 180px;
-                                    z-index: 1001;
-                                    overflow: hidden;
-                                """.trimIndent()
-                                
-                                // Categories option
-                                a {
-                                    style = """
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 10px;
-                                        padding: 12px 16px;
-                                        font-size: 14px;
-                                        font-weight: 500;
-                                        cursor: pointer;
-                                        color: #e0e0e0;
-                                        text-decoration: none;
-                                        transition: all 0.2s;
-                                        border-bottom: 1px solid rgba(255,255,255,0.1);
-                                    """.trimIndent()
-                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
-                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
-                                    onClickFunction = { e ->
-                                        e.preventDefault()
-                                        editToolsDropdownOpen = false
-                                        updateEditToolsDropdown()
-                                        showCategoryManagement()
-                                    }
-                                    span {
-                                        classes = setOf("mdi", "mdi-tag-multiple")
-                                        style = "font-size: 18px;"
-                                    }
-                                    span { +"Manage Categories" }
-                                }
-                                
-                                // Add Movie option
-                                a {
-                                    style = """
-                                        display: flex;
-                                        align-items: center;
-                                        gap: 10px;
-                                        padding: 12px 16px;
-                                        font-size: 14px;
-                                        font-weight: 500;
-                                        cursor: pointer;
-                                        color: #e0e0e0;
-                                        text-decoration: none;
-                                        transition: all 0.2s;
-                                    """.trimIndent()
-                                    attributes["onmouseover"] = "this.style.backgroundColor='rgba(255,255,255,0.1)'; this.style.color='#ffffff'"
-                                    attributes["onmouseout"] = "this.style.backgroundColor='transparent'; this.style.color='#e0e0e0'"
-                                    onClickFunction = { e ->
-                                        e.preventDefault()
-                                        editToolsDropdownOpen = false
-                                        updateEditToolsDropdown()
-                                        showAddMovieForm()
-                                    }
-                                    span {
-                                        classes = setOf("mdi", "mdi-plus")
-                                        style = "font-size: 18px;"
-                                    }
-                                    span { +"Add Movie" }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
             // Main content
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 24px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
@@ -409,18 +139,10 @@ class MovieTable(private val container: Element) {
             loadMovies()
         }
 
-        // Close dropdowns when clicking outside
+        // Close the sort dropdown when clicking outside it
         document.addEventListener("click", { event ->
             val target = event.target as? Element
             
-            // Close Edit Tools dropdown
-            val editToolsDropdown = document.getElementById("edit-tools-dropdown")
-            if (editToolsDropdown != null && target != null && !editToolsDropdown.contains(target)) {
-                editToolsDropdownOpen = false
-                updateEditToolsDropdown()
-            }
-            
-            // Close Sort dropdown
             val sortDropdown = target?.closest(".sort-dropdown")
             if (sortDropdown == null && sortDropdownOpen) {
                 sortDropdownOpen = false
@@ -2087,14 +1809,7 @@ class MovieTable(private val container: Element) {
         refreshCurrentPage()
     }
 
-    private fun updateEditToolsDropdown() {
-        val menu = document.getElementById("edit-tools-menu")
-        menu?.let {
-            it.asDynamic().style.display = if (editToolsDropdownOpen) "block" else "none"
-        }
-    }
-
-    private fun showAddMovieForm() {
+    fun showAddMovieForm() {
         val urlForm = LetterboxdUrlForm(
             container = container,
             onScrapedMovie = { scrapedMovie ->
@@ -2215,30 +1930,12 @@ class MovieTable(private val container: Element) {
         }
     }
 
-    private fun showCategoryManagement() {
-        val categoryManagementUI = CategoryManagementUI(container) {
-            // On close, refresh filter options and data - renames and merges change both
-            mainScope.launch {
-                loadFilterOptions()
-                renderFilters()
-                loadMovies()
-            }
+    /** Renames and merges change both the filter options and the movies shown. */
+    private fun refreshAfterCategoryEdit() {
+        mainScope.launch {
+            loadFilterOptions()
+            renderFilters()
+            loadMovies()
         }
-        categoryManagementUI.show()
-    }
-
-    private fun showRandomPicker() {
-        val randomPicker = RandomMoviePicker(container, onBack = {
-            render()
-        })
-        randomPicker.show()
-    }
-
-    private fun showReleaseBrowser() {
-        ReleaseBrowser(container, onBack = { render() }).show()
-    }
-
-    private fun showWishlist() {
-        WishlistPage(container, onBack = { render() }).show()
     }
 }

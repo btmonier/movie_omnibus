@@ -682,6 +682,32 @@ fun releaseDateBucket(releaseDate: String?, today: String): String {
 /** Display order for [releaseDateBucket] groups. */
 val RELEASE_BUCKET_ORDER: List<String> = listOf("Out this month", "Pre-order", "Available", "Unknown date")
 
+/** Heading for items with no usable release month. */
+const val UNKNOWN_RELEASE_MONTH = "Unknown date"
+
+private val MONTH_NAMES = listOf(
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+)
+
+private val RELEASE_MONTH_PATTERN = Regex("^(\\d{4})-(\\d{2})")
+
+/**
+ * "YYYY-MM" of a release date, so items can be grouped by month. Unlike
+ * [releaseDateBucket] a month-only date such as "2026-11" still counts.
+ */
+fun releaseMonthKey(releaseDate: String?): String? {
+    val match = releaseDate?.trim()?.let { RELEASE_MONTH_PATTERN.find(it) } ?: return null
+    val month = match.groupValues[2].toInt()
+    return if (month in 1..12) "${match.groupValues[1]}-${match.groupValues[2]}" else null
+}
+
+/** "2026-10" to "October 2026". */
+fun releaseMonthLabel(key: String): String {
+    val (year, month) = key.split("-")
+    return "${MONTH_NAMES[month.toInt() - 1]} $year"
+}
+
 /**
  * True when the release date is still ahead, covering both the "Pre-order" and
  * "Out this month" buckets: anything not out yet is something that cannot be

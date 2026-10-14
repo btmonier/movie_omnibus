@@ -38,6 +38,7 @@ private enum class GroupBy(val slug: String, val label: String) {
     TAG("tag", "Tag"),
     PRICE("price", "Price bracket"),
     RELEASE_DATE("release_date", "Release date"),
+    RELEASE_MONTH("release_month", "Release month"),
     VENDOR("vendor", "Vendor (purchased)"),
     NONE("none", "No grouping")
 }
@@ -86,10 +87,7 @@ private var removeActiveKeyListeners: (() -> Unit)? = null
  * their prices tracked over time, moving through ordered and shipped until they
  * arrive and join the collection as real releases.
  */
-class WishlistPage(
-    private val container: Element,
-    private val onBack: () -> Unit
-) {
+class WishlistPage(private val container: Element) {
     private var items: List<WishlistItem> = emptyList()
     private var summary: WishlistSummary? = null
     private var defaultTaxRate: Double = DEFAULT_TAX_RATE
@@ -237,12 +235,16 @@ class WishlistPage(
             onEdit = { openEditForm(it) },
             onAdvance = { current, target -> openStatusDialog(current, target) },
             onDelete = { confirmDelete(it) },
-            onOpenRelease = { releaseId -> ReleaseDetail(container, releaseId = releaseId, onBack = { show() }).show() },
+            onOpenRelease = { releaseId -> openRelease(releaseId) },
             // Other items on the order changed too, so the whole list is reloaded
             onOrderEdited = { reload() }
         )
         openDetail = modal
         modal.show()
+    }
+
+    private fun openRelease(releaseId: Int) {
+        ReleaseDetail(container, releaseId = releaseId, backLabel = "Back to Wishlist", onBack = { show() }).show()
     }
 
     private fun openStatusDialog(item: WishlistItem, target: WishlistStatus) {
@@ -430,43 +432,8 @@ class WishlistPage(
     private fun render() {
         container.innerHTML = ""
         container.append {
-            nav {
-                style = """
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-                    padding: 0 24px;
-                """.trimIndent()
-
-                div {
-                    style = "max-width: 1400px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center; height: 64px;"
-
-                    div {
-                        style = "display: flex; align-items: center; gap: 12px; cursor: pointer;"
-                        onClickFunction = { onBack() }
-                        span { classes = setOf("mdi", "mdi-movie-open"); style = "font-size: 28px; color: #ffffff;" }
-                        h1 {
-                            style = "font-family: 'Oswald', sans-serif; font-weight: 500; font-size: 24px; color: #ffffff; margin: 0; letter-spacing: 1px;"
-                            +"The Movie Omnibus"
-                        }
-                    }
-
-                    div {
-                        style = "display: flex; align-items: center; gap: 8px;"
-                        a {
-                            style = """
-                                display: flex; align-items: center; gap: 6px; padding: 10px 16px; font-size: 14px; font-weight: 500;
-                                cursor: pointer; background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%); color: white; border: none;
-                                border-radius: 6px; text-decoration: none; box-shadow: 0 2px 8px rgba(233, 30, 99, 0.4);
-                            """.trimIndent()
-                            span { classes = setOf("mdi", "mdi-heart"); style = "font-size: 18px;" }
-                            span { +"Wishlist" }
-                        }
-                    }
-                }
-            }
+            // Tags and stores are categories, so a rename shows up on the cards
+            appNavbar(NavSection.WISHLIST, onCategoriesClosed = { reload() })
 
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
@@ -1705,6 +1672,14 @@ class WishlistPage(
             }
             GroupBy.PRICE -> PRICE_BRACKET_ORDER.map { b -> b to visible.filter { priceBracket(it.currentPrice) == b } }
             GroupBy.RELEASE_DATE -> RELEASE_BUCKET_ORDER.map { b -> b to visible.filter { releaseDateBucket(it.releaseDate, today) == b } }
+            // Newest month first, so upcoming pre-orders lead
+            GroupBy.RELEASE_MONTH -> {
+                val byMonth = visible.groupBy { releaseMonthKey(it.releaseDate) }
+                byMonth.entries.mapNotNull { (key, items) -> key?.let { it to items } }
+                    .sortedByDescending { it.first }
+                    .map { (key, items) -> releaseMonthLabel(key) to items } +
+                    (UNKNOWN_RELEASE_MONTH to byMonth[null].orEmpty())
+            }
             GroupBy.VENDOR -> {
                 val purchased = visible.filter { it.purchase != null }
                 purchased.groupBy { it.purchase?.vendor ?: "Unknown vendor" }.toList().sortedBy { it.first.lowercase() } +
@@ -1834,7 +1809,7 @@ class WishlistPage(
                         style = outlineButtonStyle("#1a73e8")
                         span { classes = setOf("mdi", "mdi-package-variant-closed"); style = "font-size: 16px;" }
                         +"Release"
-                        onClickFunction = { ReleaseDetail(container, releaseId = item.releaseId, onBack = { show() }).show() }
+                        onClickFunction = { openRelease(item.releaseId) }
                     }
                 }
                 div { style = "flex: 1;" }

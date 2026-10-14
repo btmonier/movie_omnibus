@@ -47,6 +47,22 @@ class WishlistGroupingTest {
     }
 
     @Test
+    fun `releaseMonthKey reads year and month`() {
+        assertEquals("2026-10", releaseMonthKey("2026-10-14"))
+        assertEquals("2026-11", releaseMonthKey("2026-11"))
+        assertEquals(null, releaseMonthKey("2026"))
+        assertEquals(null, releaseMonthKey("2026-13-01"))
+        assertEquals(null, releaseMonthKey(""))
+        assertEquals(null, releaseMonthKey(null))
+    }
+
+    @Test
+    fun `releaseMonthLabel names the month`() {
+        assertEquals("January 2027", releaseMonthLabel("2027-01"))
+        assertEquals("December 2026", releaseMonthLabel("2026-12"))
+    }
+
+    @Test
     fun `derived flags on a wishlist item`() {
         val item = WishlistItem(
             title = "Invaders from Mars",

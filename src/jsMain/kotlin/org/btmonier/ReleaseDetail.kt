@@ -19,6 +19,7 @@ import org.w3c.dom.HTMLInputElement
 class ReleaseDetail(
     private val container: Element,
     private val releaseId: Int,
+    private val backLabel: String = "Back to Releases",
     private val onBack: () -> Unit
 ) {
     private var release: Release? = null
@@ -84,51 +85,30 @@ class ReleaseDetail(
         val current = release ?: return
         container.innerHTML = ""
         container.append {
-            nav {
-                style = """
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-                    padding: 0 24px;
-                """.trimIndent()
-
-                div {
-                    style = """
-                        max-width: 1400px;
-                        margin: 0 auto;
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        height: 64px;
-                    """.trimIndent()
-
-                    div {
-                        style = "display: flex; align-items: center; gap: 12px; cursor: pointer;"
-                        onClickFunction = { onBack() }
-
-                        span {
-                            classes = setOf("mdi", "mdi-arrow-left")
-                            style = "font-size: 24px; color: #ffffff;"
-                        }
-                        h1 {
-                            style = """
-                                font-family: 'Oswald', sans-serif;
-                                font-weight: 500;
-                                font-size: 22px;
-                                color: #ffffff;
-                                margin: 0;
-                                letter-spacing: 1px;
-                            """.trimIndent()
-                            +"Back to Releases"
-                        }
-                    }
-                }
-            }
+            // A release is a page within Releases, so that button returns to the list
+            appNavbar(NavSection.RELEASES, onSubpage = true, onCategoriesClosed = { show() })
 
             div {
                 style = "max-width: 1100px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
+
+                a {
+                    href = "#"
+                    style = """
+                        display: inline-flex; align-items: center; gap: 6px; margin-bottom: 20px;
+                        font-size: 14px; font-weight: 500; color: #1a73e8; text-decoration: none; cursor: pointer;
+                    """.trimIndent()
+                    attributes["onmouseover"] = "this.style.textDecoration='underline'"
+                    attributes["onmouseout"] = "this.style.textDecoration='none'"
+                    onClickFunction = { e ->
+                        e.preventDefault()
+                        onBack()
+                    }
+                    span {
+                        classes = setOf("mdi", "mdi-arrow-left")
+                        style = "font-size: 18px;"
+                    }
+                    +backLabel
+                }
 
                 releaseHeader(current)
 

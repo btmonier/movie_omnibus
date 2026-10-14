@@ -15,10 +15,7 @@ import org.w3c.dom.HTMLSelectElement
  * and tape is one card, showing how many films it holds. Clicking a card opens
  * [ReleaseDetail], which lists the films on it.
  */
-class ReleaseBrowser(
-    private val container: Element,
-    private val onBack: () -> Unit
-) {
+class ReleaseBrowser(private val container: Element) {
     private var releases: List<ReleaseSummary> = emptyList()
     private var totalCount: Int = 0
     private var totalPages: Int = 1
@@ -94,74 +91,8 @@ class ReleaseBrowser(
     private fun render() {
         container.innerHTML = ""
         container.append {
-            nav {
-                style = """
-                    position: sticky;
-                    top: 0;
-                    z-index: 1000;
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-                    padding: 0 24px;
-                """.trimIndent()
-
-                div {
-                    style = """
-                        max-width: 1400px;
-                        margin: 0 auto;
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        height: 64px;
-                    """.trimIndent()
-
-                    div {
-                        style = "display: flex; align-items: center; gap: 12px; cursor: pointer;"
-                        onClickFunction = { onBack() }
-
-                        span {
-                            classes = setOf("mdi", "mdi-movie-open")
-                            style = "font-size: 28px; color: #ffffff;"
-                        }
-                        h1 {
-                            style = """
-                                font-family: 'Oswald', sans-serif;
-                                font-weight: 500;
-                                font-size: 24px;
-                                color: #ffffff;
-                                margin: 0;
-                                letter-spacing: 1px;
-                            """.trimIndent()
-                            +"The Movie Omnibus"
-                        }
-                    }
-
-                    div {
-                        style = "display: flex; align-items: center; gap: 8px;"
-                        a {
-                            style = """
-                                display: flex;
-                                align-items: center;
-                                gap: 6px;
-                                padding: 10px 16px;
-                                font-size: 14px;
-                                font-weight: 500;
-                                cursor: pointer;
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                                color: white;
-                                border: none;
-                                border-radius: 6px;
-                                text-decoration: none;
-                                box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-                            """.trimIndent()
-                            span {
-                                classes = setOf("mdi", "mdi-package-variant-closed")
-                                style = "font-size: 18px;"
-                            }
-                            span { +"Releases" }
-                        }
-                    }
-                }
-            }
+            // Renamed distributors change both the filter options and the cards
+            appNavbar(NavSection.RELEASES, onCategoriesClosed = { show() })
 
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
