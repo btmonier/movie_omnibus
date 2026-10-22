@@ -29,7 +29,11 @@ class MovieTable(private val container: Element) {
     enum class SortField { TITLE, RELEASE_DATE, DATE_ADDED, RUNTIME }
     enum class SortDirection { ASC, DESC }
 
-    enum class ViewMode { GRID, LIST }
+    enum class ViewMode(val label: String, val icon: String) {
+        GRID("Large grid", "mdi-view-grid"),
+        COMPACT("Compact grid", "mdi-view-comfy"),
+        LIST("List", "mdi-view-list")
+    }
 
     // View mode state (persisted across reloads)
     private var viewMode: ViewMode = loadStoredViewMode()
@@ -80,10 +84,8 @@ class MovieTable(private val container: Element) {
     private val alertDialog = AlertDialog(container)
 
     private fun loadStoredViewMode(): ViewMode {
-        return when (localStorage.getItem(VIEW_MODE_STORAGE_KEY)) {
-            "LIST" -> ViewMode.LIST
-            else -> ViewMode.GRID
-        }
+        val stored = localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+        return ViewMode.entries.firstOrNull { it.name == stored } ?: ViewMode.GRID
     }
 
     private fun saveViewMode(mode: ViewMode) {
@@ -408,12 +410,11 @@ class MovieTable(private val container: Element) {
                                     overflow: hidden;
                                 """.trimIndent()
 
-                                listOf(
-                                    ViewMode.GRID to "mdi-view-grid",
-                                    ViewMode.LIST to "mdi-view-list"
-                                ).forEach { (mode, iconClass) ->
+                                ViewMode.entries.forEach { mode ->
+                                    val iconClass = mode.icon
                                     val isActive = viewMode == mode
                                     button {
+                                        attributes["title"] = mode.label
                                         style = """
                                             padding: 10px 14px;
                                             font-size: 18px;
@@ -1176,8 +1177,6 @@ class MovieTable(private val container: Element) {
         selectedCollections.clear()
         selectedCountries.clear()
         selectedMediaTypes.clear()
-        sortField = SortField.TITLE
-        sortDirection = SortDirection.ASC
         currentPage = 1
 
         // Close all dropdowns and clear search text
@@ -1594,6 +1593,11 @@ class MovieTable(private val container: Element) {
                         }
                     }
                 }
+            } else if (viewMode == ViewMode.COMPACT) {
+                div {
+                    style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px;"
+                    paginatedMovies.forEach { movie -> compactMovieCard(movie) }
+                }
             } else {
                 // List view: horizontal rows
                 div {
@@ -1799,6 +1803,120 @@ class MovieTable(private val container: Element) {
                     )
                 }
             }
+        }
+    }
+
+    /** Small cover-first tile: many more films on screen, details on hover. */
+    private fun FlowContent.compactMovieCard(movie: MovieMetadata) {
+        val runtime = movie.runtime_mins?.let { mins ->
+            if (mins >= 60) "${mins / 60}h ${mins % 60}m" else "${mins}m"
+        }
+        val metaLine = listOfNotNull(movie.release_date?.toString(), runtime).joinToString(" · ")
+
+        div {
+            style = """
+                background-color: white;
+                border-radius: 8px;
+                box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+                transition: transform 0.15s, box-shadow 0.15s;
+            """.trimIndent()
+            attributes["title"] = listOf(
+                movie.title,
+                metaLine,
+                movie.genres.take(4).joinToString(", "),
+                movie.country.take(3).joinToString(" • ")
+            ).filter { it.isNotBlank() }.joinToString("\n")
+            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.14)'"
+            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='0 1px 4px rgba(0,0,0,0.08)'"
+
+            div {
+                style = """
+                    height: 200px;
+                    background: linear-gradient(135deg, #e8f0fe 0%, #d2e3fc 100%);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                    cursor: pointer;
+                """.trimIndent()
+                onClickFunction = { metadataModal.show(movie) }
+
+                val thumb = coverThumbnailUrl(movie)
+                if (thumb != null) {
+                    img {
+                        src = thumb
+                        alt = "${movie.title} cover"
+                        style = "width: 100%; height: 100%; object-fit: cover;"
+                        attributes["onerror"] = "this.style.display='none'"
+                    }
+                } else {
+                    span {
+                        classes = setOf("mdi", "mdi-disc")
+                        style = "font-size: 40px; color: #5f6368; opacity: 0.6;"
+                    }
+                }
+
+                if (movie.physicalMedia.isNotEmpty()) {
+                    span {
+                        style = """
+                            position: absolute;
+                            top: 6px;
+                            right: 6px;
+                            display: inline-flex;
+                            align-items: center;
+                            gap: 3px;
+                            padding: 2px 7px;
+                            border-radius: 10px;
+                            font-size: 11px;
+                            font-weight: 600;
+                            color: white;
+                            background-color: #1a73e8;
+                        """.trimIndent()
+                        attributes["title"] = "${movie.physicalMedia.size} physical media ${if (movie.physicalMedia.size == 1) "entry" else "entries"}"
+                        span { classes = setOf("mdi", "mdi-disc"); style = "font-size: 12px;" }
+                        +movie.physicalMedia.size.toString()
+                    }
+                }
+            }
+
+            div {
+                style = "padding: 8px 6px 6px 10px; display: flex; align-items: flex-start; gap: 4px;"
+                div {
+                    style = "flex: 1; min-width: 0; cursor: pointer;"
+                    onClickFunction = { metadataModal.show(movie) }
+                    div {
+                        style = "font-weight: 500; font-size: 13px; color: #202124; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        +movie.title
+                    }
+                    div {
+                        style = "font-size: 11px; color: #80868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        +metaLine.ifBlank { "NA" }
+                    }
+                }
+                compactIconButton("mdi-pencil-outline", "Edit", "#1a73e8", "#e8f0fe") { showEditMovieForm(movie) }
+                compactIconButton("mdi-delete-outline", "Delete", "#d93025", "#fce8e6") { handleDeleteMovie(movie) }
+            }
+        }
+    }
+
+    private fun FlowContent.compactIconButton(
+        icon: String,
+        label: String,
+        color: String,
+        hoverBackground: String,
+        onClick: () -> Unit
+    ) {
+        button {
+            attributes["type"] = "button"
+            attributes["title"] = label
+            style = "padding: 3px; border: none; background: transparent; color: $color; cursor: pointer; border-radius: 4px; display: flex; align-items: center;"
+            attributes["onmouseover"] = "this.style.backgroundColor='$hoverBackground'"
+            attributes["onmouseout"] = "this.style.backgroundColor='transparent'"
+            span { classes = setOf("mdi", icon); style = "font-size: 16px;" }
+            onClickFunction = { onClick() }
         }
     }
 

@@ -1,14 +1,22 @@
 package org.btmonier
 
 import kotlinx.browser.document
+import kotlinx.browser.localStorage
 import kotlinx.coroutines.launch
 import kotlinx.html.*
 import kotlinx.html.dom.append
 import kotlinx.html.js.onChangeFunction
 import kotlinx.html.js.onClickFunction
+import kotlinx.html.js.onInputFunction
 import org.w3c.dom.Element
+import org.w3c.dom.HTMLElement
 import org.w3c.dom.HTMLInputElement
 import org.w3c.dom.HTMLSelectElement
+
+private const val SEARCH_INPUT_ID = "release-search-input"
+private const val SEARCH_CLEAR_ID = "release-search-clear"
+private const val CLEAR_FILTERS_ID = "release-clear-filters"
+private const val VIEW_MODE_STORAGE_KEY = "releaseViewMode"
 
 /**
  * Browse the physical shelf by release rather than by film: every box set, disc
@@ -29,6 +37,8 @@ class ReleaseBrowser(private val container: Element) {
     private var collectionsOnly: Boolean = false
     private var sortField: String = "title"
     private var sortDirection: String = "asc"
+    private var viewMode: ReleaseViewMode = ReleaseViewMode.entries
+        .firstOrNull { it.name == localStorage.getItem(VIEW_MODE_STORAGE_KEY) } ?: ReleaseViewMode.GRID
 
     private var mediaTypeOptions: List<String> = emptyList()
     private var distributorOptions: List<String> = emptyList()
@@ -42,6 +52,7 @@ class ReleaseBrowser(private val container: Element) {
             try {
                 mediaTypeOptions = fetchAllMediaTypes()
                 distributorOptions = fetchAllDistributors().map { it.name }
+                renderFilterBar()
             } catch (e: Exception) {
                 console.error("Error loading release filter options:", e)
             }
@@ -114,11 +125,18 @@ class ReleaseBrowser(private val container: Element) {
                     +"Every physical unit you own, listed once. Open a release to see which films are on it."
                 }
 
-                renderFilters()
+                div { id = "release-filters" }
 
                 div { id = "release-results" }
             }
         }
+        renderFilterBar()
+    }
+
+    private fun renderFilterBar() {
+        val bar = document.getElementById("release-filters") ?: return
+        bar.innerHTML = ""
+        bar.append { div { renderFilters() } }
     }
 
     private fun FlowContent.renderFilters() {
@@ -138,14 +156,26 @@ class ReleaseBrowser(private val container: Element) {
             div {
                 style = "flex: 2 1 260px; min-width: 220px;"
                 filterLabel("Search")
-                input(type = InputType.text) {
-                    id = "release-search-input"
-                    value = searchText
-                    placeholder = "Release title, film, distributor or URL"
-                    style = textInputStyle()
-                    onChangeFunction = { event ->
-                        searchText = (event.target as HTMLInputElement).value
-                        reload()
+                div {
+                    style = "position: relative;"
+                    input(type = InputType.text) {
+                        id = SEARCH_INPUT_ID
+                        value = searchText
+                        placeholder = "Release title, film, distributor or URL"
+                        style = textInputStyle() + " padding-right: 34px;"
+                        onInputFunction = { event ->
+                            searchText = (event.target as HTMLInputElement).value
+                            syncClearControls()
+                        }
+                        onChangeFunction = { reload() }
+                    }
+                    button {
+                        id = SEARCH_CLEAR_ID
+                        attributes["title"] = "Clear the search"
+                        attributes["type"] = "button"
+                        style = searchClearStyle(searchText.isNotBlank())
+                        span { classes = setOf("mdi", "mdi-close"); style = "font-size: 18px;" }
+                        onClickFunction = { clearSearch() }
                     }
                 }
             }
@@ -169,6 +199,7 @@ class ReleaseBrowser(private val container: Element) {
                     }
                     onChangeFunction = { event ->
                         selectedMediaType = (event.target as HTMLSelectElement).value
+                        syncClearControls()
                         reload()
                     }
                 }
@@ -193,6 +224,7 @@ class ReleaseBrowser(private val container: Element) {
                     }
                     onChangeFunction = { event ->
                         selectedDistributor = (event.target as HTMLSelectElement).value
+                        syncClearControls()
                         reload()
                     }
                 }
@@ -212,6 +244,7 @@ class ReleaseBrowser(private val container: Element) {
                     }
                     onChangeFunction = { event ->
                         selectedLocation = (event.target as HTMLSelectElement).value
+                        syncClearControls()
                         reload()
                     }
                 }
@@ -260,6 +293,7 @@ class ReleaseBrowser(private val container: Element) {
                 }
                 onClickFunction = {
                     sortDirection = if (sortDirection == "asc") "desc" else "asc"
+                    renderFilterBar()
                     reload(resetPage = false)
                 }
             }
@@ -271,13 +305,71 @@ class ReleaseBrowser(private val container: Element) {
                     style = "cursor: pointer;"
                     onChangeFunction = { event ->
                         collectionsOnly = (event.target as HTMLInputElement).checked
+                        syncClearControls()
                         reload()
                     }
                 }
                 +"Box sets only"
             }
+
+            button {
+                id = CLEAR_FILTERS_ID
+                attributes["type"] = "button"
+                attributes["title"] = "Reset every filter"
+                style = clearFiltersStyle(hasActiveFilters())
+                span { classes = setOf("mdi", "mdi-filter-remove-outline"); style = "font-size: 18px;" }
+                +"Clear filters"
+                onClickFunction = { clearFilters() }
+            }
         }
     }
+
+    private fun hasActiveFilters(): Boolean =
+        searchText.isNotBlank() || selectedMediaType.isNotEmpty() || selectedDistributor.isNotEmpty() ||
+            selectedLocation.isNotEmpty() || collectionsOnly
+
+    private fun clearSearch() {
+        if (searchText.isBlank()) return
+        searchText = ""
+        (document.getElementById(SEARCH_INPUT_ID) as? HTMLInputElement)?.value = ""
+        syncClearControls()
+        reload()
+    }
+
+    private fun clearFilters() {
+        if (!hasActiveFilters()) return
+        searchText = ""
+        selectedMediaType = ""
+        selectedDistributor = ""
+        selectedLocation = ""
+        collectionsOnly = false
+        renderFilterBar()
+        reload()
+    }
+
+    /**
+     * Show the clear controls only when there is something to clear. Patched in
+     * place rather than re-rendered, which would take the focus out of the
+     * search field mid-word.
+     */
+    private fun syncClearControls() {
+        (document.getElementById(SEARCH_CLEAR_ID) as? HTMLElement)
+            ?.setAttribute("style", searchClearStyle(searchText.isNotBlank()))
+        (document.getElementById(CLEAR_FILTERS_ID) as? HTMLElement)
+            ?.setAttribute("style", clearFiltersStyle(hasActiveFilters()))
+    }
+
+    private fun searchClearStyle(visible: Boolean): String = """
+        position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+        background: none; border: none; padding: 4px; cursor: pointer; color: #5f6368;
+        display: ${if (visible) "flex" else "none"}; align-items: center;
+    """.trimIndent()
+
+    private fun clearFiltersStyle(visible: Boolean): String = """
+        display: ${if (visible) "flex" else "none"}; align-items: center; gap: 6px;
+        padding: 0 14px; height: 40px; font-size: 14px; font-weight: 500; cursor: pointer;
+        background-color: white; color: #1a73e8; border: 1px solid #dadce0; border-radius: 4px;
+    """.trimIndent()
 
     private fun FlowContent.filterLabel(text: String) {
         label {
@@ -311,8 +403,12 @@ class ReleaseBrowser(private val container: Element) {
             }
 
             div {
-                style = "margin-bottom: 16px; color: #5f6368; font-size: 14px;"
-                +resultsSummary()
+                style = "margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
+                span {
+                    style = "color: #5f6368; font-size: 14px;"
+                    +resultsSummary()
+                }
+                viewModeToggle()
             }
 
             if (releases.isEmpty()) {
@@ -330,9 +426,19 @@ class ReleaseBrowser(private val container: Element) {
                 return@append
             }
 
-            div {
-                style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;"
-                releases.forEach { release -> releaseCard(release) }
+            when (viewMode) {
+                ReleaseViewMode.GRID -> div {
+                    style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 20px;"
+                    releases.forEach { release -> releaseCard(release) }
+                }
+                ReleaseViewMode.COMPACT -> div {
+                    style = "display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 14px;"
+                    releases.forEach { release -> compactReleaseCard(release) }
+                }
+                ReleaseViewMode.LIST -> div {
+                    style = "display: flex; flex-direction: column; border: 1px solid #e8eaed; border-radius: 12px; overflow: hidden; background-color: white;"
+                    releases.forEachIndexed { index, release -> releaseRow(release, isFirst = index == 0) }
+                }
             }
 
             div {
@@ -386,35 +492,8 @@ class ReleaseBrowser(private val container: Element) {
                     position: relative;
                 """.trimIndent()
 
-                val cover = release.coverUrl
-                if (cover != null) {
-                    img {
-                        src = cover
-                        alt = release.title ?: "Release cover"
-                        style = "max-width: 100%; max-height: 100%; object-fit: contain;"
-                        attributes["onerror"] = "this.style.display='none'"
-                    }
-                } else {
-                    span {
-                        classes = setOf("mdi", "mdi-disc")
-                        style = "font-size: 56px; color: #bdc1c6;"
-                    }
-                }
-
-                span {
-                    style = """
-                        position: absolute;
-                        top: 10px;
-                        right: 10px;
-                        padding: 4px 10px;
-                        border-radius: 12px;
-                        font-size: 12px;
-                        font-weight: 500;
-                        color: white;
-                        background-color: ${if (release.filmCount > 1) "#1a73e8" else "#5f6368"};
-                    """.trimIndent()
-                    +if (release.filmCount == 1) "1 film" else "${release.filmCount} films"
-                }
+                releaseCover(release, iconSize = 56)
+                filmCountBadge(release, top = 10, fontSize = 12)
             }
 
             div {
@@ -422,45 +501,239 @@ class ReleaseBrowser(private val container: Element) {
 
                 div {
                     style = "font-weight: 500; font-size: 15px; color: #202124; line-height: 1.35;"
-                    +(release.title?.takeIf { it.isNotBlank() } ?: release.sampleTitles.firstOrNull() ?: "Untitled release")
+                    +displayTitle(release)
                 }
 
-                if (release.title.isNullOrBlank() && release.sampleTitles.isNotEmpty()) {
-                    div {
-                        style = "font-size: 12px; color: #80868b;"
-                        +"Untitled release"
-                    }
-                } else if (release.filmCount > 1 && release.sampleTitles.isNotEmpty()) {
+                subtitle(release)?.let { text ->
                     div {
                         style = "font-size: 12px; color: #80868b; line-height: 1.4;"
-                        val extra = release.filmCount - release.sampleTitles.size
-                        +(release.sampleTitles.joinToString(", ") + if (extra > 0) " and $extra more" else "")
+                        +text
                     }
                 }
 
                 div {
                     style = "display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px;"
-                    release.mediaTypes.forEach { type -> mediaTypeChip(type) }
-                    if (release.isCollection) {
-                        span {
-                            style = chipStyle("#fef7e0", "#b06000")
-                            +"Box set"
-                        }
-                    }
+                    releaseChips(release)
                 }
 
                 div {
                     style = "font-size: 12px; color: #5f6368; margin-top: auto; padding-top: 6px;"
-                    val parts = listOfNotNull(
-                        release.distributor,
-                        release.releaseDate?.take(4),
-                        release.location
-                    )
-                    +parts.joinToString(" · ")
+                    +detailsLine(release)
                 }
             }
         }
     }
+
+    /** Small cover-first tile: many more releases on screen, details on hover. */
+    private fun FlowContent.compactReleaseCard(release: ReleaseSummary) {
+        div {
+            style = """
+                background-color: white;
+                border: 1px solid #e8eaed;
+                border-radius: 8px;
+                overflow: hidden;
+                cursor: pointer;
+                display: flex;
+                flex-direction: column;
+                transition: transform 0.15s, box-shadow 0.15s;
+            """.trimIndent()
+            attributes["title"] = listOf(displayTitle(release), detailsLine(release))
+                .filter { it.isNotBlank() }
+                .joinToString("\n")
+            attributes["onmouseover"] = "this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 12px rgba(0,0,0,0.12)'"
+            attributes["onmouseout"] = "this.style.transform='translateY(0)'; this.style.boxShadow='none'"
+            onClickFunction = { openRelease(release.id) }
+
+            div {
+                style = """
+                    height: 180px;
+                    background-color: #f1f3f4;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    position: relative;
+                """.trimIndent()
+                releaseCover(release, iconSize = 40)
+                filmCountBadge(release, top = 6, fontSize = 11)
+            }
+
+            div {
+                style = "padding: 8px 10px; display: flex; flex-direction: column; gap: 2px;"
+                div {
+                    style = "font-weight: 500; font-size: 13px; color: #202124; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    +displayTitle(release)
+                }
+                div {
+                    style = "font-size: 11px; color: #80868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    +release.mediaTypes.joinToString(" · ") { mediaTypeLabel(it) }
+                }
+            }
+        }
+    }
+
+    /** One release per row: a thumbnail and everything else read across. */
+    private fun FlowContent.releaseRow(release: ReleaseSummary, isFirst: Boolean) {
+        div {
+            style = """
+                display: flex;
+                align-items: center;
+                gap: 16px;
+                padding: 10px 16px;
+                cursor: pointer;
+                ${if (isFirst) "" else "border-top: 1px solid #e8eaed;"}
+            """.trimIndent()
+            attributes["onmouseover"] = "this.style.backgroundColor='#f8f9fa'"
+            attributes["onmouseout"] = "this.style.backgroundColor='white'"
+            onClickFunction = { openRelease(release.id) }
+
+            div {
+                style = """
+                    width: 48px;
+                    height: 64px;
+                    flex-shrink: 0;
+                    background-color: #f1f3f4;
+                    border-radius: 4px;
+                    overflow: hidden;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                """.trimIndent()
+                releaseCover(release, iconSize = 24)
+            }
+
+            div {
+                style = "flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;"
+                div {
+                    style = "font-weight: 500; font-size: 15px; color: #202124; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                    +displayTitle(release)
+                }
+                subtitle(release)?.let { text ->
+                    div {
+                        style = "font-size: 12px; color: #80868b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
+                        +text
+                    }
+                }
+                div {
+                    style = "font-size: 12px; color: #5f6368;"
+                    +detailsLine(release)
+                }
+            }
+
+            div {
+                style = "display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 260px;"
+                releaseChips(release)
+            }
+
+            div {
+                style = "width: 72px; flex-shrink: 0; text-align: right; font-size: 13px; font-weight: 500; color: ${if (release.filmCount > 1) "#1a73e8" else "#5f6368"};"
+                +filmCountLabel(release)
+            }
+        }
+    }
+
+    private fun FlowContent.viewModeToggle() {
+        div {
+            style = "display: flex; border: 1px solid #dadce0; border-radius: 8px; overflow: hidden;"
+            ReleaseViewMode.entries.forEach { mode ->
+                val isActive = viewMode == mode
+                button {
+                    attributes["type"] = "button"
+                    attributes["title"] = mode.label
+                    style = """
+                        padding: 8px 12px;
+                        font-size: 18px;
+                        cursor: pointer;
+                        background-color: ${if (isActive) "#1a73e8" else "white"};
+                        color: ${if (isActive) "white" else "#5f6368"};
+                        border: none;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                    """.trimIndent()
+                    if (!isActive) {
+                        attributes["onmouseover"] = "this.style.backgroundColor='#f1f3f4'"
+                        attributes["onmouseout"] = "this.style.backgroundColor='white'"
+                    }
+                    span { classes = setOf("mdi", mode.icon) }
+                    onClickFunction = {
+                        if (viewMode != mode) {
+                            viewMode = mode
+                            localStorage.setItem(VIEW_MODE_STORAGE_KEY, mode.name)
+                            renderResults()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private fun FlowContent.releaseCover(release: ReleaseSummary, iconSize: Int) {
+        val cover = release.coverUrl
+        if (cover != null) {
+            img {
+                src = cover
+                alt = release.title ?: "Release cover"
+                style = "max-width: 100%; max-height: 100%; object-fit: contain;"
+                attributes["onerror"] = "this.style.display='none'"
+            }
+        } else {
+            span {
+                classes = setOf("mdi", "mdi-disc")
+                style = "font-size: ${iconSize}px; color: #bdc1c6;"
+            }
+        }
+    }
+
+    private fun FlowContent.filmCountBadge(release: ReleaseSummary, top: Int, fontSize: Int) {
+        span {
+            style = """
+                position: absolute;
+                top: ${top}px;
+                right: ${top}px;
+                padding: 3px 9px;
+                border-radius: 12px;
+                font-size: ${fontSize}px;
+                font-weight: 500;
+                color: white;
+                background-color: ${if (release.filmCount > 1) "#1a73e8" else "#5f6368"};
+            """.trimIndent()
+            +filmCountLabel(release)
+        }
+    }
+
+    private fun FlowContent.releaseChips(release: ReleaseSummary) {
+        release.mediaTypes.forEach { type -> mediaTypeChip(type) }
+        if (release.isCollection) {
+            span {
+                style = chipStyle("#fef7e0", "#b06000")
+                +"Box set"
+            }
+        }
+    }
+
+    private fun displayTitle(release: ReleaseSummary): String =
+        release.title?.takeIf { it.isNotBlank() } ?: release.sampleTitles.firstOrNull() ?: "Untitled release"
+
+    private fun subtitle(release: ReleaseSummary): String? = when {
+        release.title.isNullOrBlank() && release.sampleTitles.isNotEmpty() -> "Untitled release"
+        release.filmCount > 1 && release.sampleTitles.isNotEmpty() -> {
+            val extra = release.filmCount - release.sampleTitles.size
+            release.sampleTitles.joinToString(", ") + if (extra > 0) " and $extra more" else ""
+        }
+        else -> null
+    }
+
+    private fun detailsLine(release: ReleaseSummary): String =
+        listOfNotNull(release.distributor, release.releaseDate?.take(4), release.location).joinToString(" · ")
+
+    private fun filmCountLabel(release: ReleaseSummary): String =
+        if (release.filmCount == 1) "1 film" else "${release.filmCount} films"
+}
+
+private enum class ReleaseViewMode(val label: String, val icon: String) {
+    GRID("Large grid", "mdi-view-grid"),
+    COMPACT("Compact grid", "mdi-view-comfy"),
+    LIST("List", "mdi-view-list")
 }
 
 /**

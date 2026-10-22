@@ -54,6 +54,7 @@ private const val BUDGET_EXPANDED_KEY = "wishlist-budget-expanded"
 private const val POLL_INTERVAL_MS = 1000L
 
 private const val SEARCH_INPUT_ID = "wishlist-search-input"
+private const val SORT_DIRECTION_ID = "wishlist-sort-direction"
 private const val SELECTION_BAR_ID = "wishlist-selection-bar"
 private const val RESULTS_ID = "wishlist-results"
 private const val SELECT_LINKS_ID = "wishlist-select-links"
@@ -1237,6 +1238,18 @@ class WishlistPage(private val container: Element) {
             ?.setAttribute("style", searchClearStyle(searchText.isNotBlank()))
     }
 
+    private fun sortDirectionTitle(): String = if (sortDirection == "asc") "Ascending" else "Descending"
+
+    private fun sortDirectionIcon(): String =
+        if (sortDirection == "asc") "mdi-sort-ascending" else "mdi-sort-descending"
+
+    /** The filter bar is drawn once, so the direction toggle is patched in place. */
+    private fun syncSortDirectionButton() {
+        val button = document.getElementById(SORT_DIRECTION_ID) as? HTMLElement ?: return
+        button.setAttribute("title", sortDirectionTitle())
+        button.querySelector(".mdi")?.setAttribute("class", "mdi ${sortDirectionIcon()}")
+    }
+
     private fun searchClearStyle(visible: Boolean): String = """
         position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
         background: none; border: none; padding: 4px; cursor: pointer; color: #5f6368;
@@ -1366,17 +1379,20 @@ class WishlistPage(private val container: Element) {
                             "title", "price", "release_date", "priority" -> "asc"
                             else -> "desc"
                         }
+                        syncSortDirectionButton()
                         reload()
                     }
                 }
             }
 
             button {
+                id = SORT_DIRECTION_ID
                 style = outlineButtonStyle() + " height: 40px;"
-                attributes["title"] = if (sortDirection == "asc") "Ascending" else "Descending"
-                span { classes = setOf("mdi", if (sortDirection == "asc") "mdi-sort-ascending" else "mdi-sort-descending"); style = "font-size: 18px;" }
+                attributes["title"] = sortDirectionTitle()
+                span { classes = setOf("mdi", sortDirectionIcon()); style = "font-size: 18px;" }
                 onClickFunction = {
                     sortDirection = if (sortDirection == "asc") "desc" else "asc"
+                    syncSortDirectionButton()
                     reload()
                 }
             }
