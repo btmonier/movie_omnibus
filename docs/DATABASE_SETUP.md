@@ -260,7 +260,7 @@ The web interface provides a full CRUD (Create, Read, Update, Delete) interface 
 
 #### Adding Movies
 
-1. Click the **"+ Add Movie"** button
+1. Click **"Add Item"** on the Film page (**Collection → Film**)
 2. Enter a **Letterboxd URL** (e.g., `https://letterboxd.com/film/the-godfather/`)
 3. Click **"Fetch Movie Data"** to automatically scrape movie information
 4. Review and edit the pre-populated form as needed
@@ -294,7 +294,7 @@ An entry on a shared release shows a "Shared with N films" chip. Editing its rel
 
 #### Browsing by Release
 
-The **"Releases"** button in the navbar shows the collection from the other direction - one card per physical unit, with a badge for how many films it holds:
+**Collection → Physical Media** in the navbar shows the collection from the other direction - one card per physical unit, with a badge for how many films it holds:
 
 - **Filter** by search text, format, distributor, location, or box sets only
 - **Sort** by title, film count, release date, or date added

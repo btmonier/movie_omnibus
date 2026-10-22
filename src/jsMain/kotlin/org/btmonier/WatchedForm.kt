@@ -80,6 +80,12 @@ class WatchedForm(
                     align-items: center;
                     z-index: 1000;
                 """.trimIndent()
+                onClickFunction = { event ->
+                    if (event.target == event.currentTarget) {
+                        close()
+                        onCancel()
+                    }
+                }
 
                 div {
                     style = """

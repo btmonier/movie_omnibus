@@ -99,25 +99,66 @@ class ReleaseBrowser(private val container: Element) {
         ReleaseDetail(container, releaseId = id, onBack = { show() }).show()
     }
 
+    /**
+     * Enter a release by hand, without a film or a wishlist item behind it. The
+     * new release opens once saved, so its films can be added from there.
+     */
+    fun showAddForm() {
+        PhysicalMediaForm(
+            container,
+            onSave = { media, purchaseEdit ->
+                val created = createRelease(
+                    Release(
+                        mediaTypes = media.mediaTypes,
+                        title = media.title,
+                        isCollection = media.isCollection,
+                        distributor = media.distributor,
+                        releaseDate = media.releaseDate,
+                        blurayComUrl = media.blurayComUrl,
+                        location = media.location,
+                        images = media.images
+                    )
+                )
+                val id = created.id ?: throw Exception("The server did not return the new release's id.")
+                val purchaseError = (purchaseEdit as? PurchaseEdit.Save)?.let { save ->
+                    runCatching { saveReleasePurchase(id, save.purchase) }.exceptionOrNull()
+                }
+                if (purchaseError != null) {
+                    alertDialog.show(
+                        title = "Purchase not saved",
+                        message = "The release was added, but its purchase could not be saved: ${purchaseError.message}\n\n" +
+                            "You can record it from the release's Purchase panel.",
+                        onClose = { openRelease(id) }
+                    )
+                } else {
+                    openRelease(id)
+                }
+            },
+            onCancel = {},
+            onOpenExisting = { existing -> openRelease(existing.id) }
+        ).showCreateRelease()
+    }
+
     private fun render() {
         container.innerHTML = ""
         container.append {
             // Renamed distributors change both the filter options and the cards
-            appNavbar(NavSection.RELEASES, onCategoriesClosed = { show() })
+            appNavbar(NavSection.PHYSICAL_MEDIA, onCategoriesClosed = { show() })
 
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"
 
                 div {
-                    style = "margin-bottom: 8px;"
+                    style = "margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
                     h1 {
                         style = "font-family: 'Oswald', sans-serif; font-weight: 500; color: #202124; font-size: 28px; margin: 0; display: flex; align-items: center; gap: 12px; letter-spacing: 1px;"
                         span {
-                            classes = setOf("mdi", "mdi-package-variant-closed")
+                            classes = setOf("mdi", NavSection.PHYSICAL_MEDIA.icon)
                             style = "font-size: 32px; color: #667eea;"
                         }
-                        +"Physical Releases"
+                        +NavSection.PHYSICAL_MEDIA.label
                     }
+                    addItemButton { showAddForm() }
                 }
 
                 p {

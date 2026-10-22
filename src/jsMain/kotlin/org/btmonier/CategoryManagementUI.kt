@@ -89,6 +89,9 @@ class CategoryManagementUI(private val container: Element, private val onClose: 
                     align-items: center;
                     font-family: 'Roboto', arial, sans-serif;
                 """.trimIndent()
+                onClickFunction = { event ->
+                    if (event.target == event.currentTarget) close()
+                }
 
                 div {
                     style = """

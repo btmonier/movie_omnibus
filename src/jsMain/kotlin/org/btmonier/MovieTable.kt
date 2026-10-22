@@ -103,22 +103,23 @@ class MovieTable(private val container: Element) {
     fun render() {
         container.innerHTML = ""
         container.append {
-            appNavbar(NavSection.COLLECTION, onCategoriesClosed = { refreshAfterCategoryEdit() })
+            appNavbar(NavSection.FILM, onCategoriesClosed = { refreshAfterCategoryEdit() })
 
             // Main content
             div {
                 style = "max-width: 1400px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif; background-color: #ffffff;"
 
                 div {
-                    style = "margin-bottom: 8px;"
+                    style = "margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;"
                     h1 {
                         style = "font-family: 'Oswald', sans-serif; font-weight: 500; color: #202124; font-size: 28px; margin: 0; display: flex; align-items: center; gap: 12px; letter-spacing: 1px;"
                         span {
-                            classes = setOf("mdi", NavSection.COLLECTION.icon)
+                            classes = setOf("mdi", NavSection.FILM.icon)
                             style = "font-size: 32px; color: #1a73e8;"
                         }
-                        +NavSection.COLLECTION.label
+                        +NavSection.FILM.label
                     }
+                    addItemButton { showAddMovieForm() }
                 }
 
                 p {

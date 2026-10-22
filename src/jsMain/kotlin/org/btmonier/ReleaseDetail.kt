@@ -19,7 +19,7 @@ import org.w3c.dom.HTMLInputElement
 class ReleaseDetail(
     private val container: Element,
     private val releaseId: Int,
-    private val backLabel: String = "Back to Releases",
+    private val backLabel: String = "Back to Physical Media",
     private val onBack: () -> Unit
 ) {
     private var release: Release? = null
@@ -86,7 +86,7 @@ class ReleaseDetail(
         container.innerHTML = ""
         container.append {
             // A release is a page within Releases, so that button returns to the list
-            appNavbar(NavSection.RELEASES, onSubpage = true, onCategoriesClosed = { show() })
+            appNavbar(NavSection.PHYSICAL_MEDIA, onSubpage = true, onCategoriesClosed = { show() })
 
             div {
                 style = "max-width: 1100px; margin: 0 auto; padding: 32px 20px; font-family: 'Google Sans', 'Roboto', arial, sans-serif;"

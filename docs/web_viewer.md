@@ -39,7 +39,7 @@ Changing pages scrolls back to the top of the list.
 - **Shared Releases**: A release is stored once however many films are on it, so a box set is never typed in twice. Search for one you already own in the "Existing release" picker and the film joins it.
 
 ### Browsing by Release
-- **Releases View**: The "Releases" navbar button shows one cover-art card per physical unit, badged with its film count
+- **Releases View**: **Collection → Physical Media** in the navbar shows one cover-art card per physical unit, badged with its film count
 - **Filters**: Search text, format, distributor, location, or box sets only
 - **Sorting**: By title, film count, release date, or date added
 - **Release Detail**: Cover, metadata, and a searchable, paginated list of the films on that release, so several-hundred-film sets stay usable

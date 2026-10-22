@@ -31,7 +31,9 @@ sealed interface PurchaseEdit {
 class PhysicalMediaForm(
     private val container: Element,
     private val onSave: suspend (PhysicalMedia, PurchaseEdit) -> Unit,
-    private val onCancel: () -> Unit
+    private val onCancel: () -> Unit,
+    /** Called instead of creating a duplicate when a new release's blu-ray.com URL is already recorded. */
+    private val onOpenExisting: ((ReleaseSummary) -> Unit)? = null
 ) {
     private var editingMedia: PhysicalMedia? = null
     private val imageUrls = mutableListOf<Pair<String, String?>>() // url, description
@@ -65,6 +67,13 @@ class PhysicalMediaForm(
     private var releaseOnly: Boolean = false
 
     /**
+     * True when creating a release with no film yet, from the physical media
+     * page. Release-only, but with the purchase fields, since nothing else
+     * will record what was paid for it.
+     */
+    private var creatingRelease: Boolean = false
+
+    /**
      * Show the form for creating a new physical media entry. [existingEntries] are
      * the movie's current entries, used to pre-fill the next free entry letter.
      */
@@ -75,6 +84,7 @@ class PhysicalMediaForm(
         selectedDistributor = null
         linkedRelease = null
         releaseOnly = false
+        creatingRelease = false
         sharedWithCount = 0
         suggestedEntryLetter = nextEntryLetter(existingEntries)
         existingPurchase = null
@@ -111,6 +121,7 @@ class PhysicalMediaForm(
         // itself stays fully editable.
         linkedRelease = null
         releaseOnly = false
+        creatingRelease = false
         sharedWithCount = media.sharedWithCount
         suggestedEntryLetter = nextEntryLetter(existingEntries, excludingId = media.id)
         existingPurchase = null
@@ -155,11 +166,35 @@ class PhysicalMediaForm(
         selectedDistributor = release.distributor
         linkedRelease = null
         releaseOnly = true
+        creatingRelease = false
         sharedWithCount = release.filmCount
         suggestedEntryLetter = null
         existingPurchase = null
         purchaseFields = null
         render()
+    }
+
+    /**
+     * Show the form for creating a release on its own, with no film on it yet.
+     * [onSave] receives the release-level fields as a [PhysicalMedia] with no
+     * id, and the purchase to record against the new release.
+     */
+    fun showCreateRelease() {
+        editingMedia = null
+        imageUrls.clear()
+        imageUrls.add("" to null)
+        selectedDistributor = null
+        linkedRelease = null
+        releaseOnly = true
+        creatingRelease = true
+        sharedWithCount = 0
+        suggestedEntryLetter = null
+        existingPurchase = null
+        purchaseFields = null
+        mainScope.launch {
+            loadPurchaseDefaults()
+            render()
+        }
     }
 
     /**
@@ -195,6 +230,12 @@ class PhysicalMediaForm(
                     align-items: center;
                     z-index: 1000;
                 """.trimIndent()
+                onClickFunction = { event ->
+                    if (event.target == event.currentTarget) {
+                        close()
+                        onCancel()
+                    }
+                }
 
                 div {
                     style = """
@@ -211,6 +252,7 @@ class PhysicalMediaForm(
                     h2 {
                         style = "margin-top: 0; color: #202124;"
                         +when {
+                            creatingRelease -> "Add Physical Media"
                             releaseOnly -> "Edit Release"
                             editingMedia != null -> "Edit Physical Media"
                             else -> "Add Physical Media"
@@ -308,8 +350,9 @@ class PhysicalMediaForm(
         }
 
         // Link to an existing release. Only offered when adding, since an entry
-        // that already exists is a view of a release rather than a new one.
-        if (media == null) {
+        // that already exists is a view of a release rather than a new one, and
+        // only for a film, since a release on its own has nothing to link.
+        if (media == null && !releaseOnly) {
             div { id = "release-selector-container" }
 
             mainScope.launch {
@@ -662,7 +705,7 @@ class PhysicalMediaForm(
 
         // What was paid. Recorded against the release, so a box set has one
         // price however many films are on it.
-        if (!releaseOnly) div {
+        if (!releaseOnly || creatingRelease) div {
             style = "margin-top: 24px; padding-top: 20px; border-top: 1px solid #e8eaed;"
             val fields = PurchaseFormFields(PURCHASE_FIELDS_PREFIX, existingPurchase, defaultTaxRate)
             purchaseFields = fields
@@ -894,7 +937,11 @@ class PhysicalMediaForm(
                     // This disc is already recorded. Offer to point at it rather
                     // than let a second hand-typed copy of it be created.
                     setFetchStatus(null, null)
-                    offerToLink(existing, response.physicalMedia)
+                    if (creatingRelease) {
+                        offerToOpen(existing, response.physicalMedia)
+                    } else {
+                        offerToLink(existing, response.physicalMedia)
+                    }
                 } else if (response.success && response.physicalMedia != null) {
                     applyScrapedData(response.physicalMedia)
                     setFetchStatus("Details loaded. Review and edit before saving.", "#188038")
@@ -937,6 +984,33 @@ class PhysicalMediaForm(
                 // which is the visible confirmation here - the fetch status line
                 // sits inside the block that linking hides.
                 releaseSelector?.selectRelease(existing)
+            },
+            onCancel = {
+                if (scraped != null) {
+                    applyScrapedData(scraped)
+                    setFetchStatus("Details loaded. Review and edit before saving.", "#188038")
+                }
+            }
+        )
+    }
+
+    /**
+     * The release-only counterpart of [offerToLink]: there is no film to join
+     * the release, so the choice is to open the one already recorded instead.
+     */
+    private fun offerToOpen(existing: ReleaseSummary, scraped: PhysicalMedia?) {
+        val name = existing.title?.takeIf { it.isNotBlank() } ?: "A release"
+        val films = if (existing.filmCount == 1) "1 film" else "${existing.filmCount} films"
+
+        confirmDialog.show(
+            title = "You already own this release",
+            message = "\"$name\" is already in your collection, on $films. " +
+                "Open that release instead, or enter a separate copy?",
+            confirmText = "Open existing release",
+            cancelText = "Enter separately",
+            onConfirm = {
+                close()
+                onOpenExisting?.invoke(existing)
             },
             onCancel = {
                 if (scraped != null) {

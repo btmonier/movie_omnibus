@@ -389,6 +389,19 @@ suspend fun findReleaseByBluRayUrl(url: String): ReleaseSummary? {
     return Json.decodeFromString(ReleaseSummary.serializer(), response.text().await())
 }
 
+suspend fun createRelease(release: Release): Release {
+    val response = window.fetch("$API_BASE_URL/releases", RequestInit(
+        method = "POST",
+        headers = js("({'Content-Type': 'application/json'})"),
+        body = Json.encodeToString(Release.serializer(), release)
+    )).await()
+
+    if (!response.ok) {
+        throw Exception("Failed to create release: ${response.text().await()}")
+    }
+    return Json.decodeFromString(Release.serializer(), response.text().await())
+}
+
 suspend fun updateRelease(id: Int, release: Release): Release {
     val response = window.fetch("$API_BASE_URL/releases/$id", RequestInit(
         method = "PUT",
